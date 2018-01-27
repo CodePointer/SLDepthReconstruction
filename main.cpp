@@ -3,8 +3,10 @@
 int main() {
   Reconstructor my_recon;
   bool status = true;
+
   if (status) {
     status = my_recon.Init();
+    std::cout << "Init Finished.\n";
   }
   if (status) {
     status = my_recon.Run();

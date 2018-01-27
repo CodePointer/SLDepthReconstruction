@@ -6,12 +6,15 @@
 #define SLDEPTHRECONSTRUCTION_VERTEX_SET_H
 
 
-#include <static_para.h>
+#include "static_para.h"
+#include "global_fun.h"
 #include <Eigen/Eigen>
 
 class VertexSet {
 public:
   int block_size_;
+  int block_height_;
+  int block_width_;
   int len_;
   // [[value], [pos_x], [pos_y], [valid]]
   Eigen::Matrix<double, Eigen::Dynamic, 1> vertex_val_;
@@ -19,13 +22,13 @@ public:
   Eigen::Matrix<uchar, Eigen::Dynamic, 1> valid_;
 
 
-  VertexSet(int block_size);
+  VertexSet();
   ~VertexSet();
   bool IsVertex(int x, int y);
   Eigen::Vector4i Find4ConnectVertex(int x, int y);
   int GetVertexIdxByPos(int x, int y);
   bool GetValidStatusByPos(int x, int y);
-  bool GetNeighborVertexIdxByIdx(int idx_i, const uchar dir);
+  int GetNeighborVertexIdxByIdx(int idx_i, const uchar dir);
 
 };
 

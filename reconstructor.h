@@ -14,6 +14,8 @@
 #include "vertex_set.h"
 #include <ceres/ceres.h>
 #include <ceres/cubic_interpolation.h>
+#include "deform_cost_functor.h"
+#include "regular_cost_functor.h"
 
 class Reconstructor {
 private:
@@ -39,6 +41,7 @@ private:
   std::string pro_file_suffix_;
   std::string epi_A_file_name_;
   std::string epi_B_file_name_;
+  std::string hard_mask_file_name_;
 
   ////////////////////////////////////////////////////////////////
   /// Input data & output data part.
@@ -60,8 +63,10 @@ private:
   std::string output_file_path_;
   std::string depth_file_path_;
   std::string depth_file_name_;
-  std::string x_pro_file_path_;
-  std::string x_pro_file_name_;
+  std::string vertex_file_path_;
+  std::string vertex_file_name_;
+  std::string valid_file_path_;
+  std::string valid_file_name_;
 
   ////////////////////////////////////////////////////////////////
   /// Optimization part. Related parameters.
@@ -71,10 +76,13 @@ private:
   // Functions:
   bool LoadDatasFromFiles();
   void ConvXpro2Depth(CamMatSet * ptr_cam_set);
+  void SetMaskMatFromXpro(int frm_idx);
   void SetMaskMatFromIobs(int frm_idx);
   void SetVertexFromBefore(int frm_idx);
-  bool OptimizeDepthMat(int frm_idx);
-  void WriteResult(int frm_idx);
+  bool OptimizeVertexSet(int frm_idx);
+  bool CalculateDepthMat(int frm_idx);
+  bool GenerateIest(int frm_idx);
+  bool WriteResult(int frm_idx);
 
 public:
   Reconstructor();

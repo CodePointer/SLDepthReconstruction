@@ -14,10 +14,12 @@ const int kCamVecSize = kCamHeight * kCamWidth;
 const int kProHeight = 800;
 const int kProWidth = 1280;
 
+const double kDepthMin = 20.0;
+const double kDepthMax = 60.0;
 const int kGridSize = 15;
-const int kFrameNum = 70;
-const uchar kMaskIntensityThred = 18;
-const int kMastMinAreaThred = 20;
+const int kFrameNum = 90;
+const uchar kMaskIntensityThred = 10;
+const int kMaskMinAreaThred = 20;
 
 typedef Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> ImgMatrix;
 
@@ -42,6 +44,7 @@ namespace my {
 
 struct CamMatSet {
   cv::Mat img_obs;
+  cv::Mat img_est;
   cv::Mat x_pro;
   cv::Mat y_pro;
   cv::Mat depth;
@@ -49,14 +52,15 @@ struct CamMatSet {
 };
 
 struct CalibSet {
-  Eigen::Matrix<double, 3, 3> cam;
-  Eigen::Matrix<double, 3, 3> pro;
-  Eigen::Matrix<double, 3, 3> R;
+  Eigen::Matrix<double, 3, 3, Eigen::RowMajor> cam;
+  Eigen::Matrix<double, 3, 3, Eigen::RowMajor> pro;
+  Eigen::Matrix<double, 3, 3, Eigen::RowMajor> R;
   Eigen::Matrix<double, 3, 1> t;
-  Eigen::Matrix<double, 3, 4> cam_mat;
-  Eigen::Matrix<double, 3, 4> pro_mat;
+  Eigen::Matrix<double, 3, 4, Eigen::RowMajor> cam_mat;
+  Eigen::Matrix<double, 3, 4, Eigen::RowMajor> pro_mat;
   Eigen::Matrix<double, 3, Eigen::Dynamic> M;
   Eigen::Matrix<double, 3, 1> D;
+  Eigen::Matrix<double, 3, 1> light_vec_;
 };
 
 #endif //DEPTHOPTIMIZATION_STATIC_PARA_H

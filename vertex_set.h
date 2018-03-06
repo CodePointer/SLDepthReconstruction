@@ -9,6 +9,7 @@
 #include "static_para.h"
 #include "global_fun.h"
 #include <Eigen/Eigen>
+#include <vector>
 
 class VertexSet {
 public:
@@ -25,9 +26,10 @@ public:
   VertexSet();
   ~VertexSet();
   bool IsVertex(int x, int y);
+  Eigen::Matrix<double, Eigen::Dynamic, 2> FindkNearestVertex(int x, int y, int k);
   Eigen::Vector4i Find4ConnectVertex(int x, int y);
   int GetVertexIdxByPos(int x, int y);
-  bool GetValidStatusByPos(int x, int y);
+  uchar GetValidStatusByPos(int x, int y);
   int GetNeighborVertexIdxByIdx(int idx_i, const uchar dir);
 
 };

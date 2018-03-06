@@ -375,9 +375,8 @@ void Reconstructor::SetMaskMatFromIobs(int frm_idx) {
     }
   }
   // Set result with hard_mask
-
-//  cv::imshow("test", cam_set_[frm_idx].mask * 255);
-//  cv::waitKey(0);
+  // cv::imshow("test", cam_set_[frm_idx].mask * 255);
+  // cv::waitKey(0);
   for (int h = 0; h < kCamHeight; h++) {
     for (int w = 0; w < kCamWidth; w++) {
       if ((hard_mask_.at<uchar>(h, w) == my::VERIFIED_FALSE)
@@ -440,19 +439,53 @@ void Reconstructor::SetVertexFromBefore(int frm_idx) {
       int x = vertex_set_[frm_idx].pos_(i, 0);
       int y = vertex_set_[frm_idx].pos_(i, 1);
       if (cam_set_[frm_idx].mask.at<uchar>(y, x) == my::VERIFIED_TRUE) {
-        if (vertex_set_[frm_idx - 1].valid_(i) == my::VERIFIED_TRUE) {
-          vertex_set_[frm_idx].vertex_val_(i)
-              = vertex_set_[frm_idx - 1].vertex_val_(i);
-          vertex_set_[frm_idx].valid_(i) = my::VERIFIED_TRUE;
-        } else {
-          vertex_set_[frm_idx].valid_(i) = my::INITIAL_TRUE;
+        uchar set_flag = my::VERIFIED_TRUE;
+        // 1. Last frame, vertex is not valid, set INITIAL
+        if (vertex_set_[frm_idx - 1].valid_(i) != my::VERIFIED_TRUE)
+          set_flag = my::INITIAL_TRUE;
+        // 2. Last frame, mask is false, set to INITIAL
+        if (cam_set_[frm_idx - 1].mask.at<uchar>(y, x) != my::VERIFIED_TRUE)
+          set_flag = my::INITIAL_TRUE;
+        // 3. Last frame, exceeded gradient, set to INITIAL
+        double sum_val = 0;
+        int sum_num = 0;
+        int idx_up = vertex_set_[frm_idx - 1].GetVertexIdxByPos(x, y - kGridSize);
+        if (idx_up > 0) {
+          sum_val += vertex_set_[frm_idx - 1].vertex_val_(i)
+                     - vertex_set_[frm_idx - 1].vertex_val_(idx_up);
+          sum_num += 1;
         }
+        int idx_dn = vertex_set_[frm_idx - 1].GetVertexIdxByPos(x, y + kGridSize);
+        if (idx_dn > 0) {
+          sum_val += vertex_set_[frm_idx - 1].vertex_val_(i)
+                     - vertex_set_[frm_idx - 1].vertex_val_(idx_dn);
+          sum_num += 1;
+        }
+        int idx_lf = vertex_set_[frm_idx - 1].GetVertexIdxByPos(x - kGridSize, y);
+        if (idx_lf > 0) {
+          sum_val += vertex_set_[frm_idx - 1].vertex_val_(i)
+                     - vertex_set_[frm_idx - 1].vertex_val_(idx_lf);
+          sum_num += 1;
+        }
+        int idx_rt = vertex_set_[frm_idx - 1].GetVertexIdxByPos(x + kGridSize, y);
+        if (idx_rt > 0) {
+          sum_val += vertex_set_[frm_idx - 1].vertex_val_(i)
+                     - vertex_set_[frm_idx - 1].vertex_val_(idx_rt);
+          sum_num += 1;
+        }
+        double grad = sum_val * 4 / sum_num;
+        if (grad > 8.0)
+          set_flag = my::INITIAL_TRUE;
+
+        vertex_set_[frm_idx].valid_(i) = set_flag;
+        if (set_flag == my::VERIFIED_TRUE)
+          vertex_set_[frm_idx].vertex_val_(i) = vertex_set_[frm_idx - 1].vertex_val_(i);
       }
     }
     for (int i = 0; i < vertex_set_[frm_idx].len_; i++) { // Check
       if ((vertex_set_[frm_idx].valid_(i) == my::VERIFIED_TRUE)
           && (vertex_set_[frm_idx].vertex_val_(i) <= 0)) {
-//        ErrorThrow("(last)Vertex value less than 0. i=" + Num2Str(i));
+        ErrorThrow("(last)Vertex value less than 0. i=" + Num2Str(i));
         vertex_set_[frm_idx].valid_(i) = my::INITIAL_TRUE;
       }
     }
@@ -608,6 +641,12 @@ void Reconstructor::SetVertexFromBefore(int frm_idx) {
       }
     }
   }
+
+  std::string vertex_file_name = output_file_path_ + vertex_file_path_
+                                 + vertex_file_name_ + "_init" + Num2Str(frm_idx) + ".txt";
+  SaveVecToTxt(vertex_file_name, vertex_set_[frm_idx].vertex_val_,
+                          vertex_set_[frm_idx].block_height_,
+                          vertex_set_[frm_idx].block_width_);
 }
 
 bool Reconstructor::OptimizeVertexSet(int frm_idx) {
@@ -768,6 +807,12 @@ bool Reconstructor::CalculateDepthMat(int frm_idx) {
     for (int w = 0; w < kCamWidth; w++) {
       if (cam_set_[frm_idx].mask.at<uchar>(h, w) != my::VERIFIED_TRUE)
         continue;
+//      if (h == 240 && w == 105) {
+//        printf("%f\n", vertex_set_[frm_idx].vertex_val_[16*86+7]);
+//      }
+
+      Eigen::Matrix<double, Eigen::Dynamic, 2> tmp = vertex_set_[frm_idx].FindkNearestVertex(w, h, 8);
+
       Eigen::Vector4i nb_idx_set = vertex_set_[frm_idx].Find4ConnectVertex(w, h);
       int ul_idx = nb_idx_set(0);
       int ur_idx = nb_idx_set(1);
@@ -795,6 +840,11 @@ bool Reconstructor::CalculateDepthMat(int frm_idx) {
         cam_set_[frm_idx].depth.at<double>(h, w) = d_k;
       } else {
         cam_set_[frm_idx].mask.at<uchar>(h, w) = my::MARKED;
+      }
+      if (h == 885 && w == 705) {
+//        std::cout << nb_idx_set << std::endl;
+//        printf("d_k = %f\n", d_k);
+//        printf("vertex_val_ul[%d] = %f\n", ul_idx, v_ul);
       }
     }
   }
@@ -835,18 +885,17 @@ bool Reconstructor::GenerateIest(int frm_idx) {
   double fy = calib_set_.cam_mat(1, 1);
   double dx = calib_set_.cam_mat(0, 2);
   double dy = calib_set_.cam_mat(1, 2);
-  // Apply biliteral filter on depth mat
-  cv::Mat tmp;
-  cam_set_[frm_idx].depth.copyTo(tmp);
+  // Apply Gaussian filter on depth mat
+  cv::Mat gauss_depth;
 //  cv::bilateralFilter(tmp, cam_set_[frm_idx].depth, 7, 20.0, 2.0);
-  cv::GaussianBlur(tmp, cam_set_[frm_idx].depth, cv::Size(3, 3), 3.0);
+  cv::GaussianBlur(cam_set_[frm_idx].depth, gauss_depth, cv::Size(3, 3), 3.0);
   for (int h = 0; h < kCamHeight; h++) {
     for (int w = 0; w < kCamWidth; w++) {
       if (cam_set_[frm_idx].mask.at<uchar>(h, w) != my::VERIFIED_TRUE)
         continue;
       double raw_x_pro = cam_set_[frm_idx].x_pro.at<double>(h, w);
-      double raw_depth = tmp.at<double>(h, w);
-      double depth = cam_set_[frm_idx].depth.at<double>(h, w);
+      double raw_depth = cam_set_[frm_idx].depth.at<double>(h, w);
+      double depth = gauss_depth.at<double>(h, w);
       int idx_k = h*kCamWidth + w;
       Eigen::Vector3d M = calib_set_.M.block<3, 1>(0, idx_k);
       double epi_A = epi_A_mat_.at<double>(h, w);
@@ -860,6 +909,7 @@ bool Reconstructor::GenerateIest(int frm_idx) {
 //      } else {
 //        cam_set_[frm_idx].img_est.at<uchar>(h, w) = 0;
 //      }
+
       // Add norm status
       if ((cam_set_[frm_idx].mask.at<uchar>(h + 1, w + 1) != my::VERIFIED_TRUE)
           || (cam_set_[frm_idx].mask.at<uchar>(h + 1, w) != my::VERIFIED_TRUE)
@@ -873,10 +923,10 @@ bool Reconstructor::GenerateIest(int frm_idx) {
       tmp_h1w << (w - dx) / fx, (h + 1 - dy) / fy, 1.0;
       tmp_hw1 << (w + 1 - dx) / fx, (h - dy) / fy, 1.0;
       tmp_h1w1 << (w + 1 - dx) / fx, (h + 1 - dy) / fy, 1.0;
-      obj_hw = cam_set_[frm_idx].depth.at<double>(h, w) * tmp_hw;
-      obj_h1w = cam_set_[frm_idx].depth.at<double>(h + 1, w) * tmp_h1w;
-      obj_hw1 = cam_set_[frm_idx].depth.at<double>(h, w + 1) * tmp_hw1;
-      obj_h1w1 = cam_set_[frm_idx].depth.at<double>(h + 1, w + 1) * tmp_h1w1;
+      obj_hw = gauss_depth.at<double>(h, w) * tmp_hw;
+      obj_h1w = gauss_depth.at<double>(h + 1, w) * tmp_h1w;
+      obj_hw1 = gauss_depth.at<double>(h, w + 1) * tmp_hw1;
+      obj_h1w1 = gauss_depth.at<double>(h + 1, w + 1) * tmp_h1w1;
       Eigen::Matrix<double, 3, 1> vec_ul2dr, vec_dl2ur;
       vec_ul2dr = obj_h1w1 - obj_hw;
       vec_dl2ur = obj_hw1 - obj_h1w;
@@ -901,6 +951,10 @@ bool Reconstructor::GenerateIest(int frm_idx) {
 
 bool Reconstructor::WriteResult(int frm_idx) {
   bool status = true;
+
+//  printf("Write:\n");
+//  printf("depth(%d, %d) = %f\n", 240, 105, cam_set_[frm_idx].depth.at<double>(240, 105));
+//  printf("vex_val[%d] = %f\n", 1383, vertex_set_[frm_idx].vertex_val_(1383));
 
   std::string depth_png_name = output_file_path_ + depth_file_path_
                                + depth_file_name_ + Num2Str(frm_idx) + ".png";

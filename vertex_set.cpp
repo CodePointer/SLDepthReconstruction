@@ -71,7 +71,7 @@ int VertexSet::GetVertexIdxByPos(int x, int y) {
   return -1;
 }
 
-bool VertexSet::GetValidStatusByPos(int x, int y) {
+uchar VertexSet::GetValidStatusByPos(int x, int y) {
   if ((x >= 0) && (x < kCamWidth) && (y >= 0) && (y < kCamHeight)
       && (x % block_size_ == 0) && (y % block_size_ == 0)) {
     return valid_(GetVertexIdxByPos(x, y));
@@ -112,4 +112,77 @@ int VertexSet::GetNeighborVertexIdxByIdx(int idx_i, const uchar dir) {
   }
 }
 
+Eigen::Matrix<double, Eigen::Dynamic, 2> VertexSet::FindkNearestVertex(
+    int x, int y, int k) {
+  Eigen::Matrix<double, Eigen::Dynamic, 2> vertex_set
+      = Eigen::Matrix<double, Eigen::Dynamic, 2>::Zero(k, 2);
 
+  // Search possible vertex
+  std::vector<std::pair<int, double>> possible_vertex;
+  int h_cen = (int)floor(floor(double(y) / block_size_) * block_size_);
+  int w_cen = (int)floor(floor(double(x) / block_size_) * block_size_);
+  int rad = 0;
+  bool continue_flag = true;
+  while (continue_flag) {
+    for (int w = w_cen - rad * block_size_; w < w_cen + (rad+1) * block_size_;
+         w += block_size_) {
+      int h = h_cen - rad * block_size_;
+      int idx = GetVertexIdxByPos(w, h);
+      uchar valid = GetValidStatusByPos(w, h);
+      if (idx > 0 && valid == my::VERIFIED_TRUE) {
+        double distance = sqrt((w-x)*(w-x) + (h-y)*(h-y));
+        possible_vertex.emplace_back(std::pair<int, double>(idx, distance));
+      }
+    }
+    for (int h = h_cen - rad * block_size_; h < h_cen + (rad+1) * block_size_;
+         h += block_size_) {
+      int w = w_cen + (rad+1) * block_size_;
+      int idx = GetVertexIdxByPos(w, h);
+      uchar valid = GetValidStatusByPos(w, h);
+      if (idx > 0 && valid == my::VERIFIED_TRUE) {
+        double distance = sqrt((w-x)*(w-x) + (h-y)*(h-y));
+        possible_vertex.emplace_back(std::pair<int, double>(idx, distance));
+      }
+    }
+    for (int w = w_cen + (rad+1) * block_size_; w > w_cen - rad * block_size_;
+         w -= block_size_) {
+      int h = h_cen + (rad+1) * block_size_;
+      int idx = GetVertexIdxByPos(w, h);
+      uchar valid = GetValidStatusByPos(w, h);
+      if (idx > 0 && valid == my::VERIFIED_TRUE) {
+        double distance = sqrt((w-x)*(w-x) + (h-y)*(h-y));
+        possible_vertex.emplace_back(std::pair<int, double>(idx, distance));
+      }
+    }
+    for (int h = h_cen + (rad+1) * block_size_; h > h_cen - rad * block_size_;
+         h -= block_size_) {
+      int w = w_cen - rad * block_size_;
+      int idx = GetVertexIdxByPos(w, h);
+      uchar valid = GetValidStatusByPos(w, h);
+      if (idx > 0 && valid == my::VERIFIED_TRUE) {
+        double distance = sqrt((w-x)*(w-x) + (h-y)*(h-y));
+        possible_vertex.emplace_back(std::pair<int, double>(idx, distance));
+      }
+    }
+    if (possible_vertex.size() >= k)
+      continue_flag = false;
+    rad++;
+  }
+
+  // Sort by distance
+  for (int i = 0; i < k; i++) {
+    for (int j = (int)possible_vertex.size() - 2; j >= 0; j--) {
+      std::pair<int, double> ver_back = possible_vertex[j + 1];
+      std::pair<int, double> ver_frnt = possible_vertex[j];
+      if (ver_frnt.second > ver_back.second) {
+        possible_vertex[j + 1] = ver_frnt;
+        possible_vertex[j] = ver_back;
+      }
+    }
+    vertex_set(i, 0) = possible_vertex[i].first;
+    vertex_set(i, 1) = possible_vertex[i].second;
+  }
+
+  std::cout << vertex_set << std::endl;
+  return vertex_set;
+};

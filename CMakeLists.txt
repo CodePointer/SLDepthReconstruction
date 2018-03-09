@@ -23,10 +23,15 @@ add_executable(SLDepthReconstruction
         global/global_fun.h
         vertex_set.cpp
         vertex_set.h
-        optimizer/deform_cost_functor.h
-        optimizer/deform_cost_functor.cpp
-        optimizer/regular_cost_functor.h
-        optimizer/regular_cost_functor.cpp global/global_fun.cpp)
+#        optimizer/deform_cost_functor.h
+#        optimizer/deform_cost_functor.cpp
+#        optimizer/regular_cost_functor.h
+#        optimizer/regular_cost_functor.cpp
+        global/global_fun.cpp
+        optimizer/deform_constraint.cpp
+        optimizer/deform_constraint.h
+        optimizer/regular_constraint.cpp
+        optimizer/regular_constraint.h)
 
 target_link_libraries(SLDepthReconstruction
         ceres

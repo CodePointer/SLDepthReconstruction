@@ -50,19 +50,23 @@ bool SaveMatToTxt(std::string file_name, cv::Mat mat) {
   return true;
 }
 
-bool SaveVecToTxt(std::string file_name,
-                  Eigen::Matrix<double, Eigen::Dynamic, 1> vec,
+bool SaveValToTxt(std::string file_name,
+                  Eigen::Matrix<double, Eigen::Dynamic, 4, Eigen::RowMajor> vec,
                   int kHeight, int kWidth) {
   std::fstream file(file_name, std::ios::out);
   if (!file) {
-    ErrorThrow("SaveVecToTxt, file_name=" + file_name);
+    ErrorThrow("SaveValToTxt, file_name=" + file_name);
     return false;
   }
   for (int h = 0; h < kHeight; h++) {
     for (int w = 0; w < kWidth; w++) {
-      file << vec(h * kWidth + w) << " ";
+      file << vec(h * kWidth + w, 0) << " ";
+      file << vec(h * kWidth + w, 1) << " ";
+      file << vec(h * kWidth + w, 2) << " ";
+      file << vec(h * kWidth + w, 3) << " ";
+      file << "\n";
     }
-    file << "\n";
+//    file << "\n";
   }
   return true;
 }
@@ -72,7 +76,7 @@ bool SaveVecUcharToTxt(std::string file_name,
                        int kHeight, int kWidth) {
   std::fstream file(file_name, std::ios::out);
   if (!file) {
-    ErrorThrow("SaveVecToTxt, file_name=" + file_name);
+    ErrorThrow("SaveValToTxt, file_name=" + file_name);
     return false;
   }
   for (int h = 0; h < kHeight; h++) {

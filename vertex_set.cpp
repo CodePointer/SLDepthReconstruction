@@ -9,7 +9,8 @@ VertexSet::VertexSet() {
   block_height_ = int(floor((kCamHeight - 1) / block_size_) + 1);
   block_width_ = int(floor((kCamWidth - 1) / block_size_) + 1);
   len_ = block_height_ * block_width_;
-  vertex_val_ = Eigen::Matrix<double, Eigen::Dynamic, 1>::Zero(len_, 1);
+  vertex_val_
+      = Eigen::Matrix<double, Eigen::Dynamic, 4, Eigen::RowMajor>::Zero(len_, 4);
   pos_ = Eigen::Matrix<int, Eigen::Dynamic, 2>::Zero(len_, 2);
   valid_ = Eigen::Matrix<uchar, Eigen::Dynamic, 1>::Zero(len_, 1);
   for (int h = 0; h < block_height_; h++) {
@@ -183,6 +184,6 @@ Eigen::Matrix<double, Eigen::Dynamic, 2> VertexSet::FindkNearestVertex(
     vertex_set(i, 1) = possible_vertex[i].second;
   }
 
-  std::cout << vertex_set << std::endl;
+//  std::cout << vertex_set << std::endl;
   return vertex_set;
 };

@@ -243,7 +243,11 @@ void Reconstructor::ConvXpro2Depth(CamMatSet *ptr_cam_set) {
 
 bool Reconstructor::Run() {
   bool status = true;
+  CalculateDepthMat(0);
   GenerateIest(0);
+
+  std::string I_est_name = output_file_path_ + "I_est" + Num2Str(0) + ".png";
+  cv::imwrite(I_est_name, cam_set_[0].img_est);
 
   for (int frm_idx = 1; (frm_idx < kFrameNum) && status; frm_idx++) {
     std::cout << "Frame " << frm_idx << ":" << std::endl;
@@ -289,13 +293,13 @@ bool Reconstructor::Run() {
     // Set vertex initial value
     SetVertexFromBefore(frm_idx);
     CalculateDepthMat(frm_idx);
-//    SaveVecToTxt("vertex_before.txt", vertex_set_[frm_idx].vertex_val_,
+//    SaveValToTxt("vertex_before.txt", vertex_set_[frm_idx].vertex_val_,
 //                 vertex_set_[frm_idx].block_height_,
 //                 vertex_set_[frm_idx].block_width_);
     // Optimization
     if (status)
       status = OptimizeVertexSet(frm_idx);
-//    SaveVecToTxt("vertex_after.txt", vertex_set_[frm_idx].vertex_val_,
+//    SaveValToTxt("vertex_after.txt", vertex_set_[frm_idx].vertex_val_,
 //                 vertex_set_[frm_idx].block_height_,
 //                 vertex_set_[frm_idx].block_width_);
     // Build up depth mat from mask
@@ -423,12 +427,39 @@ void Reconstructor::SetMaskMatFromIobs(int frm_idx) {
 
 void Reconstructor::SetVertexFromBefore(int frm_idx) {
   if (frm_idx == 0) { // Have depth & mask
+    cv::Mat gauss_depth;
+    cv::GaussianBlur(cam_set_[frm_idx].depth, gauss_depth, cv::Size(3, 3), 3.0);
+    double fx = calib_set_.cam_mat(0, 0);
+    double fy = calib_set_.cam_mat(1, 1);
+    double dx = calib_set_.cam_mat(0, 2);
+    double dy = calib_set_.cam_mat(1, 2);
+    Eigen::Vector3d D = calib_set_.D;
     for (int i = 0; i < vertex_set_[frm_idx].len_; i++) {
       int x = vertex_set_[frm_idx].pos_(i, 0);
       int y = vertex_set_[frm_idx].pos_(i, 1);
-      if (cam_set_[frm_idx].mask.at<uchar>(y, x) == my::VERIFIED_TRUE) {
-        vertex_set_[frm_idx].vertex_val_(i)
+      if (cam_set_[frm_idx].mask.at<uchar>(y + 1, x + 1) == my::VERIFIED_TRUE
+          && cam_set_[frm_idx].mask.at<uchar>(y + 1, x) == my::VERIFIED_TRUE
+          && cam_set_[frm_idx].mask.at<uchar>(y, x + 1) == my::VERIFIED_TRUE
+          && cam_set_[frm_idx].mask.at<uchar>(y, x) == my::VERIFIED_TRUE) {
+        Eigen::Vector3d tmp_hw, tmp_h1w, tmp_hw1, tmp_h1w1;
+        Eigen::Vector3d obj_hw, obj_h1w, obj_hw1, obj_h1w1;
+        tmp_hw << (x - dx) / fx, (y - dy) / fy, 1.0;
+        tmp_h1w << (x - dx) / fx, (y + 1 - dy) / fy, 1.0;
+        tmp_hw1 << (x + 1 - dx) / fx, (y - dy) / fy, 1.0;
+        tmp_h1w1 << (x + 1 - dx) / fx, (y + 1 - dy) / fy, 1.0;
+        obj_hw = gauss_depth.at<double>(y, x) * tmp_hw;
+        obj_h1w = gauss_depth.at<double>(y + 1, x) * tmp_h1w;
+        obj_hw1 = gauss_depth.at<double>(y, x + 1) * tmp_hw1;
+        obj_h1w1 = gauss_depth.at<double>(y + 1, x + 1) * tmp_h1w1;
+        Eigen::Vector3d vec_ul2dr, vec_dl2ur;
+        vec_ul2dr = obj_h1w1 - obj_hw;
+        vec_dl2ur = obj_hw1 - obj_h1w;
+        Eigen::Vector3d norm_vec = vec_ul2dr.cross(vec_dl2ur);
+        norm_vec = norm_vec / norm_vec.norm();
+
+        vertex_set_[frm_idx].vertex_val_(i, 0)
             = cam_set_[frm_idx].depth.at<double>(y, x);
+        vertex_set_[frm_idx].vertex_val_.block(i, 1, 1, 3) = norm_vec.transpose();
         vertex_set_[frm_idx].valid_(i) = my::VERIFIED_TRUE;
       }
     }
@@ -438,7 +469,13 @@ void Reconstructor::SetVertexFromBefore(int frm_idx) {
     for (int i = 0; i < vertex_set_[frm_idx].len_; i++) {
       int x = vertex_set_[frm_idx].pos_(i, 0);
       int y = vertex_set_[frm_idx].pos_(i, 1);
+      if (frm_idx == 3 && x == 735 && y == 825) {
+//        std::cout << "Found." << std::endl;
+      }
       if (cam_set_[frm_idx].mask.at<uchar>(y, x) == my::VERIFIED_TRUE) {
+        if (frm_idx == 3 && x == 735 && y == 825) {
+//          std::cout << "VERIFIED_TRUE." << std::endl;
+        }
         uchar set_flag = my::VERIFIED_TRUE;
         // 1. Last frame, vertex is not valid, set INITIAL
         if (vertex_set_[frm_idx - 1].valid_(i) != my::VERIFIED_TRUE)
@@ -447,46 +484,49 @@ void Reconstructor::SetVertexFromBefore(int frm_idx) {
         if (cam_set_[frm_idx - 1].mask.at<uchar>(y, x) != my::VERIFIED_TRUE)
           set_flag = my::INITIAL_TRUE;
         // 3. Last frame, exceeded gradient, set to INITIAL
-        double sum_val = 0;
-        int sum_num = 0;
-        int idx_up = vertex_set_[frm_idx - 1].GetVertexIdxByPos(x, y - kGridSize);
-        if (idx_up > 0) {
-          sum_val += vertex_set_[frm_idx - 1].vertex_val_(i)
-                     - vertex_set_[frm_idx - 1].vertex_val_(idx_up);
-          sum_num += 1;
-        }
-        int idx_dn = vertex_set_[frm_idx - 1].GetVertexIdxByPos(x, y + kGridSize);
-        if (idx_dn > 0) {
-          sum_val += vertex_set_[frm_idx - 1].vertex_val_(i)
-                     - vertex_set_[frm_idx - 1].vertex_val_(idx_dn);
-          sum_num += 1;
-        }
-        int idx_lf = vertex_set_[frm_idx - 1].GetVertexIdxByPos(x - kGridSize, y);
-        if (idx_lf > 0) {
-          sum_val += vertex_set_[frm_idx - 1].vertex_val_(i)
-                     - vertex_set_[frm_idx - 1].vertex_val_(idx_lf);
-          sum_num += 1;
-        }
-        int idx_rt = vertex_set_[frm_idx - 1].GetVertexIdxByPos(x + kGridSize, y);
-        if (idx_rt > 0) {
-          sum_val += vertex_set_[frm_idx - 1].vertex_val_(i)
-                     - vertex_set_[frm_idx - 1].vertex_val_(idx_rt);
-          sum_num += 1;
-        }
-        double grad = sum_val * 4 / sum_num;
-        if (grad > 8.0)
-          set_flag = my::INITIAL_TRUE;
+//        double sum_val = 0;
+//        int sum_num = 0;
+//        int idx_up = vertex_set_[frm_idx - 1].GetVertexIdxByPos(x, y - kGridSize);
+//        if (idx_up > 0) {
+//          sum_val += vertex_set_[frm_idx - 1].vertex_val_(i)
+//                     - vertex_set_[frm_idx - 1].vertex_val_(idx_up);
+//          sum_num += 1;
+//        }
+//        int idx_dn = vertex_set_[frm_idx - 1].GetVertexIdxByPos(x, y + kGridSize);
+//        if (idx_dn > 0) {
+//          sum_val += vertex_set_[frm_idx - 1].vertex_val_(i)
+//                     - vertex_set_[frm_idx - 1].vertex_val_(idx_dn);
+//          sum_num += 1;
+//        }
+//        int idx_lf = vertex_set_[frm_idx - 1].GetVertexIdxByPos(x - kGridSize, y);
+//        if (idx_lf > 0) {
+//          sum_val += vertex_set_[frm_idx - 1].vertex_val_(i)
+//                     - vertex_set_[frm_idx - 1].vertex_val_(idx_lf);
+//          sum_num += 1;
+//        }
+//        int idx_rt = vertex_set_[frm_idx - 1].GetVertexIdxByPos(x + kGridSize, y);
+//        if (idx_rt > 0) {
+//          sum_val += vertex_set_[frm_idx - 1].vertex_val_(i)
+//                     - vertex_set_[frm_idx - 1].vertex_val_(idx_rt);
+//          sum_num += 1;
+//        }
+//        double grad = sum_val * 4 / sum_num;
+//        if (grad > 8.0)
+//          set_flag = my::INITIAL_TRUE;
 
         vertex_set_[frm_idx].valid_(i) = set_flag;
-        if (set_flag == my::VERIFIED_TRUE)
-          vertex_set_[frm_idx].vertex_val_(i) = vertex_set_[frm_idx - 1].vertex_val_(i);
-      }
-    }
-    for (int i = 0; i < vertex_set_[frm_idx].len_; i++) { // Check
-      if ((vertex_set_[frm_idx].valid_(i) == my::VERIFIED_TRUE)
-          && (vertex_set_[frm_idx].vertex_val_(i) <= 0)) {
-        ErrorThrow("(last)Vertex value less than 0. i=" + Num2Str(i));
-        vertex_set_[frm_idx].valid_(i) = my::INITIAL_TRUE;
+        if (set_flag == my::VERIFIED_TRUE) {
+          vertex_set_[frm_idx].vertex_val_.block(i, 0, 1, 4)
+              = vertex_set_[frm_idx - 1].vertex_val_.block(i, 0, 1, 4);
+        }
+      } else {
+        vertex_set_[frm_idx].vertex_val_(i, 0) = -1;
+        vertex_set_[frm_idx].valid_(i) = my::VERIFIED_FALSE;
+        if (frm_idx == 3 && x == 735 && y == 825) {
+//          std::cout << "VERIFIED_FALSE. " << i << std::endl;
+//          std::cout << vertex_set_[frm_idx].vertex_val_(i) << std::endl;
+//          std::cout << (int)vertex_set_[frm_idx].valid_(i) << std::endl;
+        }
       }
     }
     // Fill valid mask: for every point with INITIAL_TRUE, find nearest point
@@ -496,24 +536,29 @@ void Reconstructor::SetVertexFromBefore(int frm_idx) {
       if (vertex_set_[frm_idx].valid_(i) != my::INITIAL_TRUE) {
         continue;
       }
+      // Depth: nearest depth in d^(t-1)
       int rad = 1;
       bool break_flag = false;
+      double depth_val = -1;
+      Eigen::Vector3d norm_vec = Eigen::Vector3d::Zero();
       while (!break_flag) {
         for (int r = -rad; r <= rad; r++) {
           int w_new = w + r;
           if (cam_set_[frm_idx - 1].mask.at<uchar>(h - rad, w_new)
               == my::VERIFIED_TRUE) {
-            vertex_set_[frm_idx].vertex_val_(i)
-                = cam_set_[frm_idx - 1].depth.at<double>(h - rad, w_new);
-            vertex_set_[frm_idx].valid_(i) = my::VERIFIED_TRUE;
+            depth_val = cam_set_[frm_idx - 1].depth.at<double>(h - rad, w_new);
+            norm_vec
+                = cam_set_[frm_idx - 1].norm_vec.block<3, 1>(
+                0, (h-rad)*kCamWidth + w_new);
             break_flag = true;
             break;
           }
           if (cam_set_[frm_idx - 1].mask.at<uchar>(h + rad, w_new)
               == my::VERIFIED_TRUE) {
-            vertex_set_[frm_idx].vertex_val_(i)
-                = cam_set_[frm_idx - 1].depth.at<double>(h + rad, w_new);
-            vertex_set_[frm_idx].valid_(i) = my::VERIFIED_TRUE;
+            depth_val = cam_set_[frm_idx - 1].depth.at<double>(h + rad, w_new);
+            norm_vec
+                = cam_set_[frm_idx - 1].norm_vec.block<3, 1>(
+                0, (h+rad)*kCamWidth + w_new);
             break_flag = true;
             break;
           }
@@ -524,16 +569,19 @@ void Reconstructor::SetVertexFromBefore(int frm_idx) {
           int h_new = h + r;
           if (cam_set_[frm_idx - 1].mask.at<uchar>(h_new, w - rad)
               == my::VERIFIED_TRUE) {
-            vertex_set_[frm_idx].vertex_val_(i)
-                = cam_set_[frm_idx - 1].depth.at<double>(h_new, w - rad);
-            vertex_set_[frm_idx].valid_(i) = my::VERIFIED_TRUE;
+            depth_val = cam_set_[frm_idx - 1].depth.at<double>(h_new, w - rad);
+            norm_vec
+                = cam_set_[frm_idx - 1].norm_vec.block<3, 1>(
+                0, h_new*kCamWidth + w - rad);
             break_flag = true;
             break;
           }
           if (cam_set_[frm_idx - 1].mask.at<uchar>(h_new, w + rad)
               == my::VERIFIED_TRUE) {
-            vertex_set_[frm_idx].vertex_val_(i)
-                = cam_set_[frm_idx - 1].depth.at<double>(h_new, w + rad);
+            depth_val = cam_set_[frm_idx - 1].depth.at<double>(h_new, w + rad);
+            norm_vec
+                = cam_set_[frm_idx - 1].norm_vec.block<3, 1>(
+                0, h_new*kCamWidth + w + rad);
             vertex_set_[frm_idx].valid_(i) = my::VERIFIED_TRUE;
             break_flag = true;
             break;
@@ -541,118 +589,127 @@ void Reconstructor::SetVertexFromBefore(int frm_idx) {
         }
         rad++;
       }
+      // Norm: Find nearest vertex
+//      Eigen::Matrix<double, Eigen::Dynamic, 2> nearest_ver
+//          = vertex_set_[frm_idx].FindkNearestVertex(w, h, 1);
+//      int nbr_idx = (int)nearest_ver(i, 0);
+      // Set val
+      vertex_set_[frm_idx].vertex_val_(i, 0) = depth_val;
+      vertex_set_[frm_idx].vertex_val_.block(i, 1, 1, 3) = norm_vec.transpose();
+      vertex_set_[frm_idx].valid_(i) = my::VERIFIED_TRUE;
     }
     for (int i = 0; i < vertex_set_[frm_idx].len_; i++) { // Check
       if ((vertex_set_[frm_idx].valid_(i) == my::VERIFIED_TRUE)
-          && (vertex_set_[frm_idx].vertex_val_(i) <= 0)) {
+          && (vertex_set_[frm_idx].vertex_val_(i, 0) <= 0)) {
         ErrorThrow("Vertex value less than 0. i=" + Num2Str(i));
       }
     }
 
-    // Spread: 4
+//    // Spread: 4
 //    uchar st1, st2, st3, st4;
 //    st1 = vertex_set_[frm_idx].valid_(2418);
 //    st2 = vertex_set_[frm_idx].valid_(2419);
 //    st3 = vertex_set_[frm_idx].valid_(2503);
 //    st4 = vertex_set_[frm_idx].valid_(2504);
-    for (int i = 0; i < vertex_set_[frm_idx].len_; i++) {
-      if (vertex_set_[frm_idx].valid_(i) == my::VERIFIED_TRUE) {
-        int left_idx = vertex_set_[frm_idx].GetNeighborVertexIdxByIdx(
-            i, my::DIREC_LEFT);
-        if ((left_idx > 0)
-            && (vertex_set_[frm_idx].valid_(left_idx) == my::VERIFIED_FALSE)) {
-          vertex_set_[frm_idx].vertex_val_(left_idx)
-              = vertex_set_[frm_idx].vertex_val_(i);
-          vertex_set_[frm_idx].valid_(left_idx) = my::NEIGHBOR_4;
-        }
-        int right_idx = vertex_set_[frm_idx].GetNeighborVertexIdxByIdx(
-            i, my::DIREC_RIGHT);
-        if ((right_idx > 0)
-            && (vertex_set_[frm_idx].valid_(right_idx) == my::VERIFIED_FALSE)) {
-          vertex_set_[frm_idx].vertex_val_(right_idx)
-              = vertex_set_[frm_idx].vertex_val_(i);
-          vertex_set_[frm_idx].valid_(right_idx) = my::NEIGHBOR_4;
-        }
-        int down_idx = vertex_set_[frm_idx].GetNeighborVertexIdxByIdx(
-            i, my::DIREC_DOWN);
-        if ((down_idx > 0)
-            && (vertex_set_[frm_idx].valid_(down_idx) == my::VERIFIED_FALSE)) {
-          vertex_set_[frm_idx].vertex_val_(down_idx)
-              = vertex_set_[frm_idx].vertex_val_(i);
-          vertex_set_[frm_idx].valid_(down_idx) = my::NEIGHBOR_4;
-        }
-        int up_idx = vertex_set_[frm_idx].GetNeighborVertexIdxByIdx(
-            i, my::DIREC_UP);
-        if ((up_idx > 0)
-            && (vertex_set_[frm_idx].valid_(up_idx) == my::VERIFIED_FALSE)) {
-          vertex_set_[frm_idx].vertex_val_(up_idx)
-              = vertex_set_[frm_idx].vertex_val_(i);
-          vertex_set_[frm_idx].valid_(up_idx) = my::NEIGHBOR_4;
-        }
-      }
-    }
-
-    // Spread: 8
-    for (int i = 0; i < vertex_set_[frm_idx].len_; i++) {
-      if (vertex_set_[frm_idx].valid_(i) == my::VERIFIED_TRUE) {
-        int ul_idx = vertex_set_[frm_idx].GetNeighborVertexIdxByIdx(
-            i, my::DIREC_UP_LEFT);
-        if ((ul_idx > 0)
-            && (vertex_set_[frm_idx].valid_(ul_idx) == my::VERIFIED_FALSE)) {
-          vertex_set_[frm_idx].vertex_val_(ul_idx)
-              = vertex_set_[frm_idx].vertex_val_(i);
-          vertex_set_[frm_idx].valid_(ul_idx) = my::NEIGHBOR_8;
-        }
-        int ur_idx = vertex_set_[frm_idx].GetNeighborVertexIdxByIdx(
-            i, my::DIREC_UP_RIGHT);
-        if ((ur_idx > 0)
-            && (vertex_set_[frm_idx].valid_(ur_idx) == my::VERIFIED_FALSE)) {
-          vertex_set_[frm_idx].vertex_val_(ur_idx)
-              = vertex_set_[frm_idx].vertex_val_(i);
-          vertex_set_[frm_idx].valid_(ur_idx) = my::NEIGHBOR_8;
-        }
-        int dr_idx = vertex_set_[frm_idx].GetNeighborVertexIdxByIdx(
-            i, my::DIREC_DOWN_RIGHT);
-        if ((dr_idx > 0)
-            && (vertex_set_[frm_idx].valid_(dr_idx) == my::VERIFIED_FALSE)) {
-          vertex_set_[frm_idx].vertex_val_(dr_idx)
-              = vertex_set_[frm_idx].vertex_val_(i);
-          vertex_set_[frm_idx].valid_(dr_idx) = my::NEIGHBOR_8;
-        }
-        int dl_idx = vertex_set_[frm_idx].GetNeighborVertexIdxByIdx(
-            i, my::DIREC_DOWN_LEFT);
-        if ((dl_idx > 0)
-            && (vertex_set_[frm_idx].valid_(dl_idx) == my::VERIFIED_FALSE)) {
-          vertex_set_[frm_idx].vertex_val_(dl_idx)
-              = vertex_set_[frm_idx].vertex_val_(i);
-          vertex_set_[frm_idx].valid_(dl_idx) = my::NEIGHBOR_8;
-        }
-      }
-    }
-
-    for (int i = 0; i < vertex_set_[frm_idx].len_; i++) {
-      if ((vertex_set_[frm_idx].valid_(i) == my::NEIGHBOR_4)
-          || (vertex_set_[frm_idx].valid_(i) == my::NEIGHBOR_8)) {
-        vertex_set_[frm_idx].valid_(i) = my::VERIFIED_TRUE;
-      }
-      if ((vertex_set_[frm_idx].valid_(i) == my::VERIFIED_TRUE)
-          && (vertex_set_[frm_idx].vertex_val_(i) <= 0)) {
-        ErrorThrow("Vertex value less than 0. i=" + Num2Str(i));
-      }
-    }
+//    for (int i = 0; i < vertex_set_[frm_idx].len_; i++) {
+//      if (vertex_set_[frm_idx].valid_(i) == my::VERIFIED_TRUE) {
+//        int left_idx = vertex_set_[frm_idx].GetNeighborVertexIdxByIdx(
+//            i, my::DIREC_LEFT);
+//        if ((left_idx > 0)
+//            && (vertex_set_[frm_idx].valid_(left_idx) == my::VERIFIED_FALSE)) {
+//          vertex_set_[frm_idx].vertex_val_(left_idx)
+//              = vertex_set_[frm_idx].vertex_val_(i);
+//          vertex_set_[frm_idx].valid_(left_idx) = my::NEIGHBOR_4;
+//        }
+//        int right_idx = vertex_set_[frm_idx].GetNeighborVertexIdxByIdx(
+//            i, my::DIREC_RIGHT);
+//        if ((right_idx > 0)
+//            && (vertex_set_[frm_idx].valid_(right_idx) == my::VERIFIED_FALSE)) {
+//          vertex_set_[frm_idx].vertex_val_(right_idx)
+//              = vertex_set_[frm_idx].vertex_val_(i);
+//          vertex_set_[frm_idx].valid_(right_idx) = my::NEIGHBOR_4;
+//        }
+//        int down_idx = vertex_set_[frm_idx].GetNeighborVertexIdxByIdx(
+//            i, my::DIREC_DOWN);
+//        if ((down_idx > 0)
+//            && (vertex_set_[frm_idx].valid_(down_idx) == my::VERIFIED_FALSE)) {
+//          vertex_set_[frm_idx].vertex_val_(down_idx)
+//              = vertex_set_[frm_idx].vertex_val_(i);
+//          vertex_set_[frm_idx].valid_(down_idx) = my::NEIGHBOR_4;
+//        }
+//        int up_idx = vertex_set_[frm_idx].GetNeighborVertexIdxByIdx(
+//            i, my::DIREC_UP);
+//        if ((up_idx > 0)
+//            && (vertex_set_[frm_idx].valid_(up_idx) == my::VERIFIED_FALSE)) {
+//          vertex_set_[frm_idx].vertex_val_(up_idx)
+//              = vertex_set_[frm_idx].vertex_val_(i);
+//          vertex_set_[frm_idx].valid_(up_idx) = my::NEIGHBOR_4;
+//        }
+//      }
+//    }
+//
+//    // Spread: 8
+//    for (int i = 0; i < vertex_set_[frm_idx].len_; i++) {
+//      if (vertex_set_[frm_idx].valid_(i) == my::VERIFIED_TRUE) {
+//        int ul_idx = vertex_set_[frm_idx].GetNeighborVertexIdxByIdx(
+//            i, my::DIREC_UP_LEFT);
+//        if ((ul_idx > 0)
+//            && (vertex_set_[frm_idx].valid_(ul_idx) == my::VERIFIED_FALSE)) {
+//          vertex_set_[frm_idx].vertex_val_(ul_idx)
+//              = vertex_set_[frm_idx].vertex_val_(i);
+//          vertex_set_[frm_idx].valid_(ul_idx) = my::NEIGHBOR_8;
+//        }
+//        int ur_idx = vertex_set_[frm_idx].GetNeighborVertexIdxByIdx(
+//            i, my::DIREC_UP_RIGHT);
+//        if ((ur_idx > 0)
+//            && (vertex_set_[frm_idx].valid_(ur_idx) == my::VERIFIED_FALSE)) {
+//          vertex_set_[frm_idx].vertex_val_(ur_idx)
+//              = vertex_set_[frm_idx].vertex_val_(i);
+//          vertex_set_[frm_idx].valid_(ur_idx) = my::NEIGHBOR_8;
+//        }
+//        int dr_idx = vertex_set_[frm_idx].GetNeighborVertexIdxByIdx(
+//            i, my::DIREC_DOWN_RIGHT);
+//        if ((dr_idx > 0)
+//            && (vertex_set_[frm_idx].valid_(dr_idx) == my::VERIFIED_FALSE)) {
+//          vertex_set_[frm_idx].vertex_val_(dr_idx)
+//              = vertex_set_[frm_idx].vertex_val_(i);
+//          vertex_set_[frm_idx].valid_(dr_idx) = my::NEIGHBOR_8;
+//        }
+//        int dl_idx = vertex_set_[frm_idx].GetNeighborVertexIdxByIdx(
+//            i, my::DIREC_DOWN_LEFT);
+//        if ((dl_idx > 0)
+//            && (vertex_set_[frm_idx].valid_(dl_idx) == my::VERIFIED_FALSE)) {
+//          vertex_set_[frm_idx].vertex_val_(dl_idx)
+//              = vertex_set_[frm_idx].vertex_val_(i);
+//          vertex_set_[frm_idx].valid_(dl_idx) = my::NEIGHBOR_8;
+//        }
+//      }
+//    }
+//
+//    for (int i = 0; i < vertex_set_[frm_idx].len_; i++) {
+//      if ((vertex_set_[frm_idx].valid_(i) == my::NEIGHBOR_4)
+//          || (vertex_set_[frm_idx].valid_(i) == my::NEIGHBOR_8)) {
+//        vertex_set_[frm_idx].valid_(i) = my::VERIFIED_TRUE;
+//      }
+//      if ((vertex_set_[frm_idx].valid_(i) == my::VERIFIED_TRUE)
+//          && (vertex_set_[frm_idx].vertex_val_(i) <= 0)) {
+//        ErrorThrow("Vertex value less than 0. i=" + Num2Str(i));
+//      }
+//    }
   }
 
   std::string vertex_file_name = output_file_path_ + vertex_file_path_
                                  + vertex_file_name_ + "_init" + Num2Str(frm_idx) + ".txt";
-  SaveVecToTxt(vertex_file_name, vertex_set_[frm_idx].vertex_val_,
-                          vertex_set_[frm_idx].block_height_,
-                          vertex_set_[frm_idx].block_width_);
+  SaveValToTxt(
+      vertex_file_name, vertex_set_[frm_idx].vertex_val_,
+      vertex_set_[frm_idx].block_height_, vertex_set_[frm_idx].block_width_);
 }
 
 bool Reconstructor::OptimizeVertexSet(int frm_idx) {
   bool status = true;
   ceres::Problem problem;
-  double alpha = 1.0;
+  double alpha_val = 1.0;
+  double alpha_norm = 1.0;
 
   // Add blocks
   double fx = calib_set_.cam_mat(0, 0);
@@ -666,132 +723,129 @@ bool Reconstructor::OptimizeVertexSet(int frm_idx) {
         continue;
       }
       // Add Data Term
-      Eigen::Matrix<double, 2, 2> grid_range; // h_lf, w_up; h_rt, w_dn
-      Eigen::Vector4i nb_idx_set
-          = vertex_set_[frm_idx].Find4ConnectVertex(w, h);
-      int ul_idx = nb_idx_set(0);
-      int ur_idx = nb_idx_set(1);
-      int dr_idx = nb_idx_set(2);
-      int dl_idx = nb_idx_set(3);
-      if ((ul_idx < 0) || (ur_idx < 0) || (dr_idx < 0) || (dl_idx < 0))
-        continue;
-      grid_range(0, 0) = vertex_set_[frm_idx].pos_(ul_idx, 1);
-      grid_range(0, 1) = vertex_set_[frm_idx].pos_(ul_idx, 0);
-      grid_range(1, 0) = vertex_set_[frm_idx].pos_(dr_idx, 1);
-      grid_range(1, 1) = vertex_set_[frm_idx].pos_(dr_idx, 0);
-      Eigen::Matrix<double, 2, 1> pos_k;
-      pos_k << h, w;
+      Eigen::Matrix<double, Eigen::Dynamic, 2> vertex_nbr
+          = vertex_set_[frm_idx].FindkNearestVertex(w, h, kNearestPoints + 1);
+      double* data_set = vertex_set_[frm_idx].vertex_val_.data();
+      std::vector<double*> parameter_blocks;
       int idx_k = h*kCamWidth + w;
-      double img_obs = double(cam_set_[frm_idx].img_obs.at<uchar>(h, w));
-      double img_obs_last = double(cam_set_[frm_idx - 1].img_obs.at<uchar>(h, w));
-      double img_est_last = double(cam_set_[frm_idx - 1].img_est.at<uchar>(h, w));
+      double img_obs = (double)(cam_set_[frm_idx].img_obs.at<uchar>(h, w));
       Eigen::Matrix<double, 3, 1> vec_M = calib_set_.M.block<3, 1>(0, idx_k);
       Eigen::Matrix<double, 3, 1> vec_D = calib_set_.D;
-      double epi_A, epi_B;
-      epi_A = epi_A_mat_.at<double>(h, w);
-      epi_B = epi_B_mat_.at<double>(h, w);
-      ceres::CostFunction * data_fun =
-          new ceres::AutoDiffCostFunction<DeformCostFunctor, 1, 1, 1, 1, 1>(
-              new DeformCostFunctor(*pat_grid_, img_obs, img_obs_last,
-                                    img_est_last, vec_M, vec_D,
-                                    epi_A, epi_B, grid_range, pos_k,
-                                    fx, fy, dx, dy, calib_set_.light_vec_));
-      if (ceres::IsNaN(vertex_set_[frm_idx].vertex_val_.data()[ul_idx])) {
-        continue;
-        ErrorThrow("Nan problem when calculating.");
-      }
-      if (ceres::IsNaN(vertex_set_[frm_idx].vertex_val_.data()[ur_idx])) {
-        continue;
-        ErrorThrow("Nan problem when calculating.");
-      }
-      if (ceres::IsNaN(vertex_set_[frm_idx].vertex_val_.data()[dr_idx])) {
-        continue;
-        ErrorThrow("Nan problem when calculating.");
-      }
-      if (ceres::IsNaN(vertex_set_[frm_idx].vertex_val_.data()[dl_idx])) {
-        continue;
-        ErrorThrow("Nan problem when calculating.");
-      }
-      problem.AddResidualBlock(
-          data_fun, nullptr,
-          &vertex_set_[frm_idx].vertex_val_.data()[ul_idx],
-          &vertex_set_[frm_idx].vertex_val_.data()[ur_idx],
-          &vertex_set_[frm_idx].vertex_val_.data()[dr_idx],
-          &vertex_set_[frm_idx].vertex_val_.data()[dl_idx]);
+      double epi_A = epi_A_mat_.at<double>(h, w);
+      double epi_B = epi_B_mat_.at<double>(h, w);
+      DeformConstraint::DeformCostFunction* cost_function =
+          DeformConstraint::Create(
+              *pat_grid_, img_obs, kNearestPoints, vec_M, vec_D,
+              epi_A, epi_B, fx, fy, dx, dy,
+              calib_set_.light_vec_, vertex_nbr, data_set, &parameter_blocks);
+      problem.AddResidualBlock(cost_function, nullptr, parameter_blocks);
       block_num++;
     }
   }
 
   // Add residual block: Regular Term
-  for (int h = 0; h < kCamHeight; h++) {
-    for (int w = 0; w < kCamWidth; w++) {
-      if (vertex_set_[frm_idx].IsVertex(w, h)) {
-        int idx_i = vertex_set_[frm_idx].GetVertexIdxByPos(w, h);
-        int idx_up = vertex_set_[frm_idx].GetNeighborVertexIdxByIdx(
-            idx_i, my::DIREC_UP);
-        int idx_rt = vertex_set_[frm_idx].GetNeighborVertexIdxByIdx(
-            idx_i, my::DIREC_RIGHT);
-        int idx_dn = vertex_set_[frm_idx].GetNeighborVertexIdxByIdx(
-            idx_i, my::DIREC_DOWN);
-        int idx_lf = vertex_set_[frm_idx].GetNeighborVertexIdxByIdx(
-            idx_i, my::DIREC_LEFT);
-        if ((idx_up == 0) && (idx_rt == 0) && (idx_dn == 0) && (idx_lf == 0)) {
-          continue;
-        }
-        ceres::CostFunction * reg_fun =
-            new ceres::AutoDiffCostFunction<RegularCostFunctor, 1, 1, 1, 1, 1, 1>(
-                new RegularCostFunctor(alpha));
-        double d_i = vertex_set_[frm_idx].vertex_val_.data()[idx_i];
-        double depth_i = vertex_set_[frm_idx].vertex_val_(idx_i);
-        double d_up = vertex_set_[frm_idx].vertex_val_.data()[idx_up];
-        double d_rt = vertex_set_[frm_idx].vertex_val_.data()[idx_rt];
-        double d_dn = vertex_set_[frm_idx].vertex_val_.data()[idx_dn];
-        double d_lt = vertex_set_[frm_idx].vertex_val_.data()[idx_lf];
-        if ((d_i <= 0)) {
-          continue;
-        }
-        if (ceres::IsNaN(vertex_set_[frm_idx].vertex_val_.data()[idx_i])) {
-          continue;
-          ErrorThrow("NaN problem for reg.");
-        }
-        if (ceres::IsNaN(vertex_set_[frm_idx].vertex_val_.data()[idx_up])) {
-          continue;
-          ErrorThrow("NaN problem for reg.");
-        }
-        if (ceres::IsNaN(vertex_set_[frm_idx].vertex_val_.data()[idx_rt])) {
-          continue;
-          ErrorThrow("NaN problem for reg.");
-        }
-        if (ceres::IsNaN(vertex_set_[frm_idx].vertex_val_.data()[idx_dn])) {
-          continue;
-          ErrorThrow("NaN problem for reg.");
-        }
-        if (ceres::IsNaN(vertex_set_[frm_idx].vertex_val_.data()[idx_lf])) {
-          continue;
-          ErrorThrow("NaN problem for reg.");
-        }
-        problem.AddResidualBlock(
-            reg_fun, nullptr,
-            &vertex_set_[frm_idx].vertex_val_.data()[idx_i],
-            &vertex_set_[frm_idx].vertex_val_.data()[idx_up],
-            &vertex_set_[frm_idx].vertex_val_.data()[idx_rt],
-            &vertex_set_[frm_idx].vertex_val_.data()[idx_dn],
-            &vertex_set_[frm_idx].vertex_val_.data()[idx_lf]);
-        block_num++;
-      }
-    }
+  for (int ver_idx = 0; ver_idx < vertex_set_[frm_idx].len_; ver_idx++) {
+    int w = vertex_set_[frm_idx].pos_(ver_idx, 0);
+    int h = vertex_set_[frm_idx].pos_(ver_idx, 1);
+    if (vertex_set_[frm_idx].valid_(ver_idx) != my::VERIFIED_TRUE)
+      continue;
+    Eigen::Matrix<double, Eigen::Dynamic, 2> vertex_nbr
+        = vertex_set_[frm_idx].FindkNearestVertex(w, h, kRegularNbr + 2);
+    double* data_set = vertex_set_[frm_idx].vertex_val_.data();
+    std::vector<double*> parameter_blocks;
+    RegularConstraint::RegularCostFunction* cost_function =
+        RegularConstraint::Create(
+            alpha_val, alpha_norm, kRegularNbr, vertex_nbr, data_set,
+            &parameter_blocks);
+    problem.AddResidualBlock(cost_function, nullptr, parameter_blocks);
+    block_num++;
   }
+
+  // Add residual block: Regular Term
+//  for (int h = 0; h < kCamHeight; h++) {
+//    for (int w = 0; w < kCamWidth; w++) {
+//      if (vertex_set_[frm_idx].IsVertex(w, h)) {
+//        int idx_i = vertex_set_[frm_idx].GetVertexIdxByPos(w, h);
+//        int idx_up = vertex_set_[frm_idx].GetNeighborVertexIdxByIdx(
+//            idx_i, my::DIREC_UP);
+//        int idx_rt = vertex_set_[frm_idx].GetNeighborVertexIdxByIdx(
+//            idx_i, my::DIREC_RIGHT);
+//        int idx_dn = vertex_set_[frm_idx].GetNeighborVertexIdxByIdx(
+//            idx_i, my::DIREC_DOWN);
+//        int idx_lf = vertex_set_[frm_idx].GetNeighborVertexIdxByIdx(
+//            idx_i, my::DIREC_LEFT);
+//        if ((idx_up == 0) && (idx_rt == 0) && (idx_dn == 0) && (idx_lf == 0)) {
+//          continue;
+//        }
+//        ceres::CostFunction * reg_fun =
+//            new ceres::AutoDiffCostFunction<RegularCostFunctor, 1, 1, 1, 1, 1, 1>(
+//                new RegularCostFunctor(alpha));
+//        double d_i = vertex_set_[frm_idx].vertex_val_.data()[idx_i];
+//        double depth_i = vertex_set_[frm_idx].vertex_val_(idx_i);
+//        double d_up = vertex_set_[frm_idx].vertex_val_.data()[idx_up];
+//        double d_rt = vertex_set_[frm_idx].vertex_val_.data()[idx_rt];
+//        double d_dn = vertex_set_[frm_idx].vertex_val_.data()[idx_dn];
+//        double d_lt = vertex_set_[frm_idx].vertex_val_.data()[idx_lf];
+//        if ((d_i <= 0)) {
+//          continue;
+//        }
+//        if (ceres::IsNaN(vertex_set_[frm_idx].vertex_val_.data()[idx_i])) {
+//          continue;
+//          ErrorThrow("NaN problem for reg.");
+//        }
+//        if (ceres::IsNaN(vertex_set_[frm_idx].vertex_val_.data()[idx_up])) {
+//          continue;
+//          ErrorThrow("NaN problem for reg.");
+//        }
+//        if (ceres::IsNaN(vertex_set_[frm_idx].vertex_val_.data()[idx_rt])) {
+//          continue;
+//          ErrorThrow("NaN problem for reg.");
+//        }
+//        if (ceres::IsNaN(vertex_set_[frm_idx].vertex_val_.data()[idx_dn])) {
+//          continue;
+//          ErrorThrow("NaN problem for reg.");
+//        }
+//        if (ceres::IsNaN(vertex_set_[frm_idx].vertex_val_.data()[idx_lf])) {
+//          continue;
+//          ErrorThrow("NaN problem for reg.");
+//        }
+//        problem.AddResidualBlock(
+//            reg_fun, nullptr,
+//            &vertex_set_[frm_idx].vertex_val_.data()[idx_i*4],
+//            &vertex_set_[frm_idx].vertex_val_.data()[idx_up*4],
+//            &vertex_set_[frm_idx].vertex_val_.data()[idx_rt*4],
+//            &vertex_set_[frm_idx].vertex_val_.data()[idx_dn*4],
+//            &vertex_set_[frm_idx].vertex_val_.data()[idx_lf*4]);
+//        block_num++;
+//      }
+//    }
+//  }
 
   ceres::Solver::Options options;
   options.gradient_tolerance = 1e-10;
   options.function_tolerance = 1e-10;
   options.min_relative_decrease = 1e-1;
   options.linear_solver_type = ceres::SPARSE_NORMAL_CHOLESKY;
-  options.max_num_iterations = 1000;
+  options.max_num_iterations = 200;
   options.minimizer_progress_to_stdout = false;
   ceres::Solver::Summary summary;
 
+//  if (frm_idx == 3) {
+//    int idx = vertex_set_[frm_idx].GetVertexIdxByPos(735, 825);
+//    std::cout << "Before Opt: " << idx << std::endl;
+//    std::cout << vertex_set_[frm_idx].vertex_val_(idx) << std::endl;
+//    std::cout << (int)vertex_set_[frm_idx].valid_(idx) << std::endl;
+//  }
+
   ceres::Solve(options, &problem, &summary);
+
+//  if (frm_idx == 3) {
+//    int idx = vertex_set_[frm_idx].GetVertexIdxByPos(735, 825);
+//    std::cout << "After Opt: " << idx << std::endl;
+//    std::cout << vertex_set_[frm_idx].vertex_val_(idx) << std::endl;
+//    std::cout << (int)vertex_set_[frm_idx].valid_(idx) << std::endl;
+//  }
+
   // Save?
 //  std::cout << summary.FullReport() << std::endl;
   std::cout << summary.BriefReport() << std::endl;
@@ -803,39 +857,64 @@ bool Reconstructor::CalculateDepthMat(int frm_idx) {
 
   cam_set_[frm_idx].depth.create(kCamHeight, kCamWidth, CV_64FC1);
   cam_set_[frm_idx].depth.setTo(0);
+  cam_set_[frm_idx].norm_vec
+      = Eigen::Matrix<double, 3, Eigen::Dynamic>::Zero(3, kCamHeight * kCamWidth);
   for (int h = 0; h < kCamHeight; h++) {
     for (int w = 0; w < kCamWidth; w++) {
       if (cam_set_[frm_idx].mask.at<uchar>(h, w) != my::VERIFIED_TRUE)
         continue;
-//      if (h == 240 && w == 105) {
-//        printf("%f\n", vertex_set_[frm_idx].vertex_val_[16*86+7]);
-//      }
+      Eigen::Matrix<double, Eigen::Dynamic, 2> vertex_nbr
+          = vertex_set_[frm_idx].FindkNearestVertex(w, h, kNearestPoints + 1);
+      // Calculate w(i)*Z
+      Eigen::Matrix<double, Eigen::Dynamic, 1> weight
+          = Eigen::Matrix<double, Eigen::Dynamic, 1>::Zero(kNearestPoints, 1);
+      double sum_val = 0;
+      for (int i = 0; i < kNearestPoints; i++) {
+        weight(i) = pow((1 - vertex_nbr(i, 1) / vertex_nbr(kNearestPoints, 1)), 2);
+        sum_val += weight(i);
+      }
+      // Calculate d_k
+      double d_k = 0;
+      for (int i = 0; i < kNearestPoints; i++) {
+        int idx = (int)vertex_nbr(i, 0);
+        d_k += (vertex_set_[frm_idx].vertex_val_(idx, 0) * weight(i)) / sum_val;
+      }
+      // Calculate norm
+      Eigen::Vector3d norm_k = Eigen::Vector3d::Zero();
+      for (int i = 0; i < kNearestPoints; i++) {
+        int idx = (int)vertex_nbr(i, 0);
+        Eigen::Matrix<double, 1, 3> tmp_norm
+            = vertex_set_[frm_idx].vertex_val_.block<1, 3>(idx, 1);
+        norm_k += weight(i) * tmp_norm.transpose();
+//        norm_k += tmp_norm.transpose();
+//        break;
+      }
+//      std::cout << norm_k << std::endl;
+      cam_set_[frm_idx].norm_vec.block<3, 1>(0, h * kCamWidth + w) = norm_k;
 
-      Eigen::Matrix<double, Eigen::Dynamic, 2> tmp = vertex_set_[frm_idx].FindkNearestVertex(w, h, 8);
-
-      Eigen::Vector4i nb_idx_set = vertex_set_[frm_idx].Find4ConnectVertex(w, h);
-      int ul_idx = nb_idx_set(0);
-      int ur_idx = nb_idx_set(1);
-      int dr_idx = nb_idx_set(2);
-      int dl_idx = nb_idx_set(3);
-      double v_ul = vertex_set_[frm_idx].vertex_val_(ul_idx);
-      double v_ur = vertex_set_[frm_idx].vertex_val_(ur_idx);
-      double v_dr = vertex_set_[frm_idx].vertex_val_(dr_idx);
-      double v_dl = vertex_set_[frm_idx].vertex_val_(dl_idx);
-      int h_up = vertex_set_[frm_idx].pos_(ul_idx, 1);
-      int w_lf = vertex_set_[frm_idx].pos_(ul_idx, 0);
-      int h_dn = vertex_set_[frm_idx].pos_(dr_idx, 1);
-      int w_rt = vertex_set_[frm_idx].pos_(dr_idx, 0);
-      double dis_lf = double(w - w_lf) / double(kGridSize);
-      double dis_rt = double(w_rt - w) / double(kGridSize);
-      double dis_up = double(h - h_up) / double(kGridSize);
-      double dis_dn = double(h_dn - h) / double(kGridSize);
-      double d_up = v_ul * (1 - dis_lf) + v_ur * (1 - dis_rt);
-      double d_dn = v_dl * (1 - dis_lf) + v_dr * (1 - dis_rt);
-      double d_lf = v_ul * (1 - dis_up) + v_dl * (1 - dis_dn);
-      double d_rt = v_ur * (1 - dis_up) + v_dr * (1 - dis_dn);
-      double d_k = 0.5 * (d_up * (1 - dis_up) + d_dn * (1 - dis_dn))
-                   + 0.5 * (d_lf * (1 - dis_lf) + d_rt * (1 - dis_rt));
+//      Eigen::Vector4i nb_idx_set = vertex_set_[frm_idx].Find4ConnectVertex(w, h);
+//      int ul_idx = nb_idx_set(0);
+//      int ur_idx = nb_idx_set(1);
+//      int dr_idx = nb_idx_set(2);
+//      int dl_idx = nb_idx_set(3);
+//      double v_ul = vertex_set_[frm_idx].vertex_val_(ul_idx);
+//      double v_ur = vertex_set_[frm_idx].vertex_val_(ur_idx);
+//      double v_dr = vertex_set_[frm_idx].vertex_val_(dr_idx);
+//      double v_dl = vertex_set_[frm_idx].vertex_val_(dl_idx);
+//      int h_up = vertex_set_[frm_idx].pos_(ul_idx, 1);
+//      int w_lf = vertex_set_[frm_idx].pos_(ul_idx, 0);
+//      int h_dn = vertex_set_[frm_idx].pos_(dr_idx, 1);
+//      int w_rt = vertex_set_[frm_idx].pos_(dr_idx, 0);
+//      double dis_lf = double(w - w_lf) / double(kGridSize);
+//      double dis_rt = double(w_rt - w) / double(kGridSize);
+//      double dis_up = double(h - h_up) / double(kGridSize);
+//      double dis_dn = double(h_dn - h) / double(kGridSize);
+//      double d_up = v_ul * (1 - dis_lf) + v_ur * (1 - dis_rt);
+//      double d_dn = v_dl * (1 - dis_lf) + v_dr * (1 - dis_rt);
+//      double d_lf = v_ul * (1 - dis_up) + v_dl * (1 - dis_dn);
+//      double d_rt = v_ur * (1 - dis_up) + v_dr * (1 - dis_dn);
+//      double d_k = 0.5 * (d_up * (1 - dis_up) + d_dn * (1 - dis_dn))
+//                   + 0.5 * (d_lf * (1 - dis_lf) + d_rt * (1 - dis_rt));
       if ((d_k >= kDepthMin) && (d_k <= kDepthMax)) {
         cam_set_[frm_idx].depth.at<double>(h, w) = d_k;
       } else {
@@ -849,25 +928,25 @@ bool Reconstructor::CalculateDepthMat(int frm_idx) {
     }
   }
   // Interpolation
-  for (int h = 0; h < kCamHeight; h++) {
-    for (int w = 0; w < kCamWidth; w++) {
-      if (cam_set_[frm_idx].mask.at<uchar>(h, w) == my::MARKED) {
-        int search_rad = 5;
-        double sum_val = 0;
-        int sum_num = 0;
-        for (int d_h = -search_rad; d_h <= search_rad; d_h++) {
-          for (int d_w = -search_rad; d_w <= search_rad; d_w++) {
-            if (cam_set_[frm_idx].mask.at<uchar>(h+d_h, w+d_w) == my::VERIFIED_TRUE) {
-              sum_num++;
-              sum_val += cam_set_[frm_idx].depth.at<double>(h+d_h, w+d_w);
-            }
-          }
-        }
-        cam_set_[frm_idx].depth.at<double>(h, w) = sum_val / double(sum_num);
-        cam_set_[frm_idx].mask.at<uchar>(h, w) = my::VERIFIED_TRUE;
-      }
-    }
-  }
+//  for (int h = 0; h < kCamHeight; h++) {
+//    for (int w = 0; w < kCamWidth; w++) {
+//      if (cam_set_[frm_idx].mask.at<uchar>(h, w) == my::MARKED) {
+//        int search_rad = 5;
+//        double sum_val = 0;
+//        int sum_num = 0;
+//        for (int d_h = -search_rad; d_h <= search_rad; d_h++) {
+//          for (int d_w = -search_rad; d_w <= search_rad; d_w++) {
+//            if (cam_set_[frm_idx].mask.at<uchar>(h+d_h, w+d_w) == my::VERIFIED_TRUE) {
+//              sum_num++;
+//              sum_val += cam_set_[frm_idx].depth.at<double>(h+d_h, w+d_w);
+//            }
+//          }
+//        }
+//        cam_set_[frm_idx].depth.at<double>(h, w) = sum_val / double(sum_num);
+//        cam_set_[frm_idx].mask.at<uchar>(h, w) = my::VERIFIED_TRUE;
+//      }
+//    }
+//  }
 //  cv::namedWindow("depth" + Num2Str(frm_idx));
 //  cv::imshow("depth" + Num2Str(frm_idx), cam_set_[frm_idx].depth / 30);
 //  cv::waitKey(0);
@@ -881,59 +960,25 @@ bool Reconstructor::GenerateIest(int frm_idx) {
   cam_set_[frm_idx].img_est.create(kCamHeight, kCamWidth, CV_8UC1);
   cam_set_[frm_idx].img_est.setTo(0);
   Eigen::Vector3d D = calib_set_.D;
-  double fx = calib_set_.cam_mat(0, 0);
-  double fy = calib_set_.cam_mat(1, 1);
-  double dx = calib_set_.cam_mat(0, 2);
-  double dy = calib_set_.cam_mat(1, 2);
-  // Apply Gaussian filter on depth mat
-  cv::Mat gauss_depth;
-//  cv::bilateralFilter(tmp, cam_set_[frm_idx].depth, 7, 20.0, 2.0);
-  cv::GaussianBlur(cam_set_[frm_idx].depth, gauss_depth, cv::Size(3, 3), 3.0);
   for (int h = 0; h < kCamHeight; h++) {
     for (int w = 0; w < kCamWidth; w++) {
       if (cam_set_[frm_idx].mask.at<uchar>(h, w) != my::VERIFIED_TRUE)
         continue;
-      double raw_x_pro = cam_set_[frm_idx].x_pro.at<double>(h, w);
-      double raw_depth = cam_set_[frm_idx].depth.at<double>(h, w);
-      double depth = gauss_depth.at<double>(h, w);
+      // Get depth
+      double depth = cam_set_[frm_idx].depth.at<double>(h, w);
       int idx_k = h*kCamWidth + w;
       Eigen::Vector3d M = calib_set_.M.block<3, 1>(0, idx_k);
       double epi_A = epi_A_mat_.at<double>(h, w);
       double epi_B = epi_B_mat_.at<double>(h, w);
       double x_pro = (M(0)*depth + D(0)) / (M(2)*depth + D(2));
       double y_pro = (-epi_A/epi_B)*x_pro + 1 / epi_B;
+      // Get img_intensity
       double img_k_head;
       pat_grid_->Evaluate(y_pro, x_pro, &img_k_head);
-//      if (img_k_head > 0.5) {
-//        cam_set_[frm_idx].img_est.at<uchar>(h, w) = 255;
-//      } else {
-//        cam_set_[frm_idx].img_est.at<uchar>(h, w) = 0;
-//      }
-
-      // Add norm status
-      if ((cam_set_[frm_idx].mask.at<uchar>(h + 1, w + 1) != my::VERIFIED_TRUE)
-          || (cam_set_[frm_idx].mask.at<uchar>(h + 1, w) != my::VERIFIED_TRUE)
-          || (cam_set_[frm_idx].mask.at<uchar>(h, w + 1) != my::VERIFIED_TRUE)
-          || (cam_set_[frm_idx].mask.at<uchar>(h, w) != my::VERIFIED_TRUE)) {
-        continue;
-      }
-      Eigen::Matrix<double, 3, 1> tmp_hw, tmp_h1w, tmp_hw1, tmp_h1w1;
-      Eigen::Matrix<double, 3, 1> obj_hw, obj_h1w, obj_hw1, obj_h1w1;
-      tmp_hw << (w - dx) / fx, (h - dy) / fy, 1.0;
-      tmp_h1w << (w - dx) / fx, (h + 1 - dy) / fy, 1.0;
-      tmp_hw1 << (w + 1 - dx) / fx, (h - dy) / fy, 1.0;
-      tmp_h1w1 << (w + 1 - dx) / fx, (h + 1 - dy) / fy, 1.0;
-      obj_hw = gauss_depth.at<double>(h, w) * tmp_hw;
-      obj_h1w = gauss_depth.at<double>(h + 1, w) * tmp_h1w;
-      obj_hw1 = gauss_depth.at<double>(h, w + 1) * tmp_hw1;
-      obj_h1w1 = gauss_depth.at<double>(h + 1, w + 1) * tmp_h1w1;
-      Eigen::Matrix<double, 3, 1> vec_ul2dr, vec_dl2ur;
-      vec_ul2dr = obj_h1w1 - obj_hw;
-      vec_dl2ur = obj_hw1 - obj_h1w;
-      Eigen::Matrix<double, 3, 1> norm_vec = vec_ul2dr.cross(vec_dl2ur);
-      norm_vec = norm_vec / norm_vec.norm();
+      // Set norm_weight
+      Eigen::Vector3d norm_vec
+          = cam_set_[frm_idx].norm_vec.block<3, 1>(0, h * kCamWidth + w);
       double norm_weight = norm_vec.transpose() * calib_set_.light_vec_;
-//      norm_weight = (norm_weight - 0.5) * 2;
       if ((norm_weight < 0)) {
         cam_set_[frm_idx].img_est.at<uchar>(h, w) = kMaskIntensityThred;
         continue;
@@ -943,7 +988,7 @@ bool Reconstructor::GenerateIest(int frm_idx) {
   }
   cv::namedWindow("I_est" + Num2Str(frm_idx));
   cv::imshow("I_est" + Num2Str(frm_idx), cam_set_[frm_idx].img_est);
-  cv::waitKey(2000);
+  cv::waitKey(000);
   cv::destroyWindow("I_est" + Num2Str(frm_idx));
 
   return status;
@@ -968,10 +1013,16 @@ bool Reconstructor::WriteResult(int frm_idx) {
 
   std::string vertex_file_name = output_file_path_ + vertex_file_path_
                                  + vertex_file_name_ + Num2Str(frm_idx) + ".txt";
+//  if (frm_idx == 3) {
+//    int idx = vertex_set_[frm_idx].GetVertexIdxByPos(735, 825);
+//    std::cout << "When Write: " << idx << std::endl;
+//    std::cout << vertex_set_[frm_idx].vertex_val_(idx) << std::endl;
+//    std::cout << (int)vertex_set_[frm_idx].valid_(idx) << std::endl;
+//  }
   if (status)
-    status = SaveVecToTxt(vertex_file_name, vertex_set_[frm_idx].vertex_val_,
-                          vertex_set_[frm_idx].block_height_,
-                          vertex_set_[frm_idx].block_width_);
+    status = SaveValToTxt(
+        vertex_file_name, vertex_set_[frm_idx].vertex_val_,
+        vertex_set_[frm_idx].block_height_, vertex_set_[frm_idx].block_width_);
   std::string valid_file_name = output_file_path_ + valid_file_path_
                                 + valid_file_name_ + Num2Str(frm_idx) + ".txt";
   if (status)

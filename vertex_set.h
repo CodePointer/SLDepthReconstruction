@@ -18,7 +18,8 @@ public:
   int block_width_;
   int len_;
   // [[value], [pos_x], [pos_y], [valid]]
-  Eigen::Matrix<double, Eigen::Dynamic, 1> vertex_val_;
+  // Value: Include vertex_val and norm direction
+  Eigen::Matrix<double, Eigen::Dynamic, 4, Eigen::RowMajor> vertex_val_;
   Eigen::Matrix<int, Eigen::Dynamic, 2> pos_;
   Eigen::Matrix<uchar, Eigen::Dynamic, 1> valid_;
 

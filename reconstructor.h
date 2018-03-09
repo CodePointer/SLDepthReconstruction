@@ -14,12 +14,14 @@
 #include "vertex_set.h"
 #include <ceres/ceres.h>
 #include <ceres/cubic_interpolation.h>
-#include "deform_cost_functor.h"
-#include "regular_cost_functor.h"
+#include "deform_constraint.h"
+//#include "deform_cost_functor.h"
+#include "regular_constraint.h"
+//#include "regular_cost_functor.h"
 
 class Reconstructor {
 private:
-
+  EIGEN_MAKE_ALIGNED_OPERATOR_NEW;
   ////////////////////////////////////////////////////////////////
   /// FileName part. Used for loading.
   ///  main_file_path
@@ -42,7 +44,6 @@ private:
   std::string epi_A_file_name_;
   std::string epi_B_file_name_;
   std::string hard_mask_file_name_;
-
   ////////////////////////////////////////////////////////////////
   /// Input data & output data part.
   /// Most of them are matrix(cv::Mat).

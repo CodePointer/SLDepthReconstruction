@@ -18,38 +18,32 @@ public:
       double img_obs, double img_obs_last, double img_est_last,
       Eigen::Matrix<double, 3, 1> vec_M,
       Eigen::Matrix<double, 3, 1> vec_D, double epi_A, double epi_B,
-      Eigen::Matrix<double, 2, 2> range, Eigen::Matrix<double, 2, 1> pos_k,
+      Eigen::Matrix<double, Eigen::Dynamic, 1> weight,
       double fx, double fy, double dx, double dy,
       Eigen::Matrix<double, 3, 1> light_vec);
 
   template <class T>
-  bool operator()(const T* const v_ul, const T* const v_ur,
-                  const T* const v_dl, const T* const v_dr, T* residuals) const {
-    if (ceres::IsNaN(v_ul[0])) {
+  bool operator()(const T* const v_1, const T* const v_2,
+                  const T* const v_3, const T* const v_4, T* residuals) const {
+    if (ceres::IsNaN(v_1[0])) {
       ErrorThrow("v_ul nan error.");
     }
-    if (ceres::IsNaN(v_ur[0])) {
+    if (ceres::IsNaN(v_2[0])) {
       ErrorThrow("v_ur nan error.");
     }
-    if (ceres::IsNaN(v_dl[0])) {
+    if (ceres::IsNaN(v_3[0])) {
       ErrorThrow("v_dl nan error.");
     }
-    if (ceres::IsNaN(v_dr[0])) {
+    if (ceres::IsNaN(v_4[0])) {
       ErrorThrow("v_dr nan error.");
     }
     // get d_k
-    double kBlockHeight = range_(1, 0) - range_(0, 0);
-    double kBlockWidth = this->range_(1, 1) - this->range_(0, 1);
-    double dis_lf = (this->pos_k_(1) - this->range_(0, 1)) / kBlockWidth;
-    double dis_rt = (this->range_(1, 1) - this->pos_k_(1)) / kBlockWidth;
-    double dis_up = (this->pos_k_(0) - this->range_(0, 0)) / kBlockHeight;
-    double dis_dn = (this->range_(1, 0) - this->pos_k_(0)) / kBlockHeight;
-    T d_up = v_ul[0] * T(1 - dis_lf) + v_ur[0] * T(1 - dis_rt);
-    T d_dn = v_dl[0] * T(1 - dis_lf) + v_dr[0] * T(1 - dis_rt);
-    T d_lf = v_ul[0] * T(1 - dis_up) + v_dl[0] * T(1 - dis_dn);
-    T d_rt = v_ur[0] * T(1 - dis_up) + v_dr[0] * T(1 - dis_dn);
-    T d_k = 0.5 * (d_up * (1 - dis_up) + d_dn * (1 - dis_dn))
-            + 0.5 * (d_lf * (1 - dis_lf) + d_rt * (1 - dis_rt));
+    double d_k = 0;
+    d_k += weight_(0) * v_1[0];
+    d_k += weight_(1) * v_2[0];
+    d_k += weight_(2) * v_3[0];
+    d_k += weight_(3) * v_4[0];
+
     // Get x_pro, y_pro, Intensity from pattern
     Eigen::Matrix<T, 3, 1> M = this->vec_M_.cast<T>();
     Eigen::Matrix<T, 3, 1> D = this->vec_D_.cast<T>();
@@ -102,15 +96,10 @@ public:
   double epi_A_;
   double epi_B_;
   // For interpolation
-  Eigen::Matrix<double, 2, 2> range_; // [up_left_h&W, down_right_h&w];
-  Eigen::Matrix<double, 2, 1> pos_k_;
+  Eigen::Matrix<double, Eigen::Dynamic, 1> weight_;
 
   double f_x_, f_y_, d_x_, d_y_;
   Eigen::Matrix<double, 3, 1> light_vec_;
-  // cv::Mat light_vec_;
-  // Add: double f_x, f_y, d_x, d_y;
-  // -- Calculate obj_point of 4 points, then the norm
-  // -- norm + vec -> final intensity
 };
 
 

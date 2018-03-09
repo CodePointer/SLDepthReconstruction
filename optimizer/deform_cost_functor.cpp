@@ -8,8 +8,8 @@ DeformCostFunctor::DeformCostFunctor(
     ceres::BiCubicInterpolator<ceres::Grid2D<double, 1>> &pattern,
     double img_obs, double img_obs_last, double img_est_last,
     Eigen::Matrix<double, 3, 1> vec_M, Eigen::Matrix<double, 3, 1> vec_D,
-    double epi_A, double epi_B, Eigen::Matrix<double, 2, 2> range,
-    Eigen::Matrix<double, 2, 1> pos_k,
+    double epi_A, double epi_B,
+    Eigen::Matrix<double, Eigen::Dynamic, 1> weight,
     double f_x, double f_y, double d_x, double d_y,
     Eigen::Matrix<double, 3, 1> light_vec) : pattern_(pattern) {
   this->img_obs_ = img_obs;
@@ -19,8 +19,7 @@ DeformCostFunctor::DeformCostFunctor(
   this->vec_D_ = vec_D;
   this->epi_A_ = epi_A;
   this->epi_B_ = epi_B;
-  this->range_ = range;
-  this->pos_k_ = pos_k;
+  this->weight_ = weight;
   this->f_x_ = f_x;
   this->f_y_ = f_y;
   this->d_x_ = d_x;

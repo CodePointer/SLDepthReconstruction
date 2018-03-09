@@ -20,6 +20,8 @@ const int kGridSize = 15;
 const int kFrameNum = 90;
 const uchar kMaskIntensityThred = 10;
 const int kMaskMinAreaThred = 20;
+const int kNearestPoints = 8; // Used for neighbor interpolation
+const int kRegularNbr = 8;
 
 typedef Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> ImgMatrix;
 
@@ -49,6 +51,7 @@ struct CamMatSet {
   cv::Mat y_pro;
   cv::Mat depth;
   cv::Mat mask;
+  Eigen::Matrix<double, 3, Eigen::Dynamic> norm_vec;
 };
 
 struct CalibSet {

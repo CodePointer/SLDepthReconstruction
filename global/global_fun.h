@@ -19,8 +19,8 @@ cv::Mat LoadTxtToMat(std::string file_name, int kHeight, int kWidth);
 
 bool SaveMatToTxt(std::string file_name, cv::Mat mat);
 
-bool SaveVecToTxt(std::string file_name,
-                  Eigen::Matrix<double, Eigen::Dynamic, 1> vec,
+bool SaveValToTxt(std::string file_name,
+                  Eigen::Matrix<double, Eigen::Dynamic, 4, Eigen::RowMajor> vec,
                   int kHeight, int kWidth);
 
 bool SaveVecUcharToTxt(std::string file_name,

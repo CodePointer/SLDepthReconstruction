@@ -43,6 +43,13 @@ public:
     norm_vec = norm_vec / norm_vec.norm();
     Eigen::Matrix<T, 3, 1> light_vec = light_vec_.cast<T>();
     T norm_weight = light_vec.transpose() * norm_vec;
+    if (norm_weight < T(0)) {
+      norm_weight = T(0);
+    }
+    if (norm_weight > T(1) || norm_weight < T(-1)) {
+      ErrorThrow("Norm calculation false.");
+      return false;
+    }
     // Get intensity from pattern
     T img_est_intensity;
     Eigen::Matrix<T, 3, 1> M = this->vec_M_.cast<T>();

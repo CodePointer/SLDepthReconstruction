@@ -34,6 +34,22 @@ cv::Mat LoadTxtToMat(std::string file_name, int kHeight, int kWidth) {
   return result;
 }
 
+void LoadTxtToEigen(std::string file_name, int kHeight, int kWidth, double * data) {
+  std::fstream file(file_name, std::ios::in);
+  if (!file) {
+    ErrorThrow("LoadTxtToEigen, file_name=" + file_name);
+  }
+  for (int h = 0; h < kHeight; h++) {
+    for (int w = 0; w < kWidth; w++) {
+      double tmp;
+      file >> tmp;
+//      data[w*kHeight + h] = tmp;
+      data[h*kWidth + w] = tmp;
+    }
+  }
+  file.close();
+}
+
 bool SaveMatToTxt(std::string file_name, cv::Mat mat) {
   cv::Size mat_size = mat.size();
   std::fstream file(file_name, std::ios::out);

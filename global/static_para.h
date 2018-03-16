@@ -19,9 +19,9 @@ const double kDepthMax = 60.0;
 const int kGridSize = 15;
 const int kFrameNum = 90;
 const uchar kMaskIntensityThred = 10;
-const int kMaskMinAreaThred = 20;
-const int kNearestPoints = 4; // Used for neighbor interpolation
-const int kRegularNbr = 4;
+const int kMaskMinAreaThred = 40;
+const int kNearestPoints = 8; // Used for neighbor interpolation
+const int kRegularNbr = 8;
 
 typedef Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> ImgMatrix;
 

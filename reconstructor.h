@@ -31,6 +31,7 @@ private:
   ///  ---->pro_file_name, pro_file_suffix_
   ///  -->pattern_file_name, pattern_file_suffix
   ///  -->epi_A_file_name_, epi_B_file_name_
+  ///  -->cam_matrix, pro_matrix, rot, trans, light_vec
   ////////////////////////////////////////////////////////////////
   std::string main_file_path_;
   std::string pattern_file_name_;
@@ -43,7 +44,12 @@ private:
   std::string pro_file_suffix_;
   std::string epi_A_file_name_;
   std::string epi_B_file_name_;
-  std::string hard_mask_file_name_;
+  std::string cam_matrix_name_;
+  std::string pro_matrix_name_;
+  std::string rots_name_;
+  std::string trans_name_;
+  std::string light_name_;
+//  std::string hard_mask_file_name_;
   ////////////////////////////////////////////////////////////////
   /// Input data & output data part.
   /// Most of them are matrix(cv::Mat).

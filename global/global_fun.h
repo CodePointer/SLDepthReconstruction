@@ -17,6 +17,10 @@ void ErrorThrow(std::string error_info);
 
 cv::Mat LoadTxtToMat(std::string file_name, int kHeight, int kWidth);
 
+// Eigen::rowMajor; txt is rowMajor
+void LoadTxtToEigen(std::string file_name,
+                    int kHeight, int kWidth, double * data);
+
 bool SaveMatToTxt(std::string file_name, cv::Mat mat);
 
 bool SaveValToTxt(std::string file_name,

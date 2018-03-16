@@ -29,7 +29,7 @@ Reconstructor::~Reconstructor() {
 bool Reconstructor::Init() {
   bool status = true;
   // Set file path
-  main_file_path_ = "/home/pointer/CLionProjects/Data/20180122/HandMove/";
+  main_file_path_ = "/home/pointer/CLionProjects/Data/20180313/Face_2Color_1/";
   pattern_file_name_ = "pattern_gauss";
   pattern_file_suffix_ = ".txt";
   dyna_file_path_ = "cam_0/dyna/";
@@ -38,11 +38,16 @@ bool Reconstructor::Init() {
   pro_file_path_ = "cam_0/pro/";
   pro_file_name_ = "xpro_mat";
   pro_file_suffix_ = ".txt";
-  epi_A_file_name_ = "cam0_pro/EpiLine_A.txt";
-  epi_B_file_name_ = "cam0_pro/EpiLine_B.txt";
-  hard_mask_file_name_ = "cam0_pro/hard_mask.png";
+  epi_A_file_name_ = "EpiMatA.txt";
+  epi_B_file_name_ = "EpiMatB.txt";
+  cam_matrix_name_ = "cam_matrix.txt";
+  pro_matrix_name_ = "pro_matrix.txt";
+  rots_name_ = "rots.txt";
+  trans_name_ = "trans.txt";
+  light_name_ = "light_vec.txt";
+//  hard_mask_file_name_ = "cam0_pro/hard_mask.png";
   // Set output file path
-  output_file_path_ = "/home/pointer/CLionProjects/Data/20180122/HandMove/result/";
+  output_file_path_ = main_file_path_ + "result/";
   depth_file_path_ = "";
   depth_file_name_ = "depth";
   vertex_file_path_ = "";
@@ -63,25 +68,11 @@ bool Reconstructor::Init() {
 
 bool Reconstructor::LoadDatasFromFiles() {
   // Calib_Set:M, D, cam_0, cam_1
-  calib_set_.cam << 2426.231977104875, 0, 634.7636169096244,
-      0, 2423.019176341463, 422.664603232326,
-      0, 0, 1;
-  calib_set_.pro << 1910.445054230685, 0, 674.7918402916996,
-      0, 1919.469009195578, 670.8165424942966,
-      0, 0, 1;
-  calib_set_.R << 0.9641898953391403, -0.009497729569831175, 0.2650427113861386,
-      0.0486242666266381, 0.9887495098811747, -0.1414570161029787,
-      -0.2607173304959209, 0.1492789330172048, 0.9538041065839074;
-  calib_set_.t << -6.309369886992315,
-      -1.716176874067702,
-      5.309834884842104;
-//  calib_set_.light_vec_ << -0.12036800,
-//      0.13673927,
-//      -0.98326696;
-  calib_set_.light_vec_ << 0.13673927,
-      -0.12036800,
-      -0.98326696;
-
+  LoadTxtToEigen(main_file_path_ + cam_matrix_name_, 3, 3, calib_set_.cam.data());
+  LoadTxtToEigen(main_file_path_ + pro_matrix_name_, 3, 3, calib_set_.pro.data());
+  LoadTxtToEigen(main_file_path_ + rots_name_, 3, 3, calib_set_.R.data());
+  LoadTxtToEigen(main_file_path_ + trans_name_, 3, 1, calib_set_.t.data());
+  LoadTxtToEigen(main_file_path_ + light_name_, 3, 1, calib_set_.light_vec_.data());
   calib_set_.cam_mat.block(0, 0, 3, 3) = calib_set_.cam;
   calib_set_.cam_mat.block(0, 3, 3, 1) = Eigen::Matrix<double, 3, 1>::Zero();
 //  std::cout << calib_set_.cam_mat << std::endl;
@@ -93,6 +84,7 @@ bool Reconstructor::LoadDatasFromFiles() {
 //  std::cout << tmp << std::endl;
   calib_set_.pro_mat = calib_set_.pro * tmp;
 //  std::cout << calib_set_.pro_mat << std::endl;
+
   calib_set_.D = calib_set_.pro_mat.block<3, 1>(0, 3);
   calib_set_.M = Eigen::Matrix<double, 3, Eigen::Dynamic>::Zero(3, kCamVecSize);
   double dx = calib_set_.cam_mat(0, 2);
@@ -123,16 +115,19 @@ bool Reconstructor::LoadDatasFromFiles() {
                                   kCamHeight, kCamWidth);
   epi_B_mat_ = LoadTxtToMat(main_file_path_ + epi_B_file_name_,
                                   kCamHeight, kCamWidth);
-  hard_mask_ = cv::imread(main_file_path_ + hard_mask_file_name_, cv::IMREAD_GRAYSCALE);
+  hard_mask_.create(kCamHeight, kCamWidth, CV_8UC1);
   for (int h = 0; h < kCamHeight; h++) {
     for (int w = 0; w < kCamWidth; w++) {
-      if (hard_mask_.at<uchar>(h, w) == 255) {
-        hard_mask_.at<uchar>(h, w) = my::VERIFIED_TRUE;
-      } else {
+      double epi_A_val = epi_A_mat_.at<double>(h, w);
+      double epi_B_val = epi_B_mat_.at<double>(h, w);
+      if (epi_A_val == 0 && epi_B_val == 0) {
         hard_mask_.at<uchar>(h, w) = my::VERIFIED_FALSE;
+      } else {
+        hard_mask_.at<uchar>(h, w) = my::VERIFIED_TRUE;
       }
     }
   }
+
   // Cam_set
   cam_set_ = new CamMatSet[kFrameNum];
   vertex_set_ = new VertexSet[kFrameNum];
@@ -416,7 +411,7 @@ void Reconstructor::SetMaskMatFromIobs(int frm_idx) {
   }
   cv::namedWindow("I_obs" + Num2Str(frm_idx));
   cv::imshow("I_obs" + Num2Str(frm_idx), cam_set_[frm_idx].img_obs);
-  cv::imwrite("I_obs" + Num2Str(frm_idx) + ".png", cam_set_[frm_idx].img_obs);
+  cv::imwrite(output_file_path_ + "I_obs" + Num2Str(frm_idx) + ".png", cam_set_[frm_idx].img_obs);
   cv::waitKey(2000);
   cv::destroyWindow("I_obs" + Num2Str(frm_idx));
 //  cv::namedWindow("mask" + Num2Str(frm_idx));
@@ -464,73 +459,94 @@ void Reconstructor::SetVertexFromBefore(int frm_idx) {
       }
     }
   } else { // Not have
+    double error_thred = 6.0;
+    int check_rad = 5;
     // Check last frame: last frame have value, Set to VERIFIED_TRUE.
     // Otherwise, set to INITIAL_TRUE.
     for (int i = 0; i < vertex_set_[frm_idx].len_; i++) {
       int x = vertex_set_[frm_idx].pos_(i, 0);
       int y = vertex_set_[frm_idx].pos_(i, 1);
-      if (frm_idx == 3 && x == 735 && y == 825) {
-//        std::cout << "Found." << std::endl;
-      }
-      if (cam_set_[frm_idx].mask.at<uchar>(y, x) == my::VERIFIED_TRUE) {
-        if (frm_idx == 3 && x == 735 && y == 825) {
-//          std::cout << "VERIFIED_TRUE." << std::endl;
-        }
-        uchar set_flag = my::VERIFIED_TRUE;
-        // 1. Last frame, vertex is not valid, set INITIAL
-        if (vertex_set_[frm_idx - 1].valid_(i) != my::VERIFIED_TRUE)
-          set_flag = my::INITIAL_TRUE;
-        if (vertex_set_[frm_idx - 1].vertex_val_(i, 0) < 0)
-          set_flag = my::INITIAL_TRUE;
-        // 2. Last frame, mask is false, set to INITIAL
-        if (cam_set_[frm_idx - 1].mask.at<uchar>(y, x) != my::VERIFIED_TRUE)
-          set_flag = my::INITIAL_TRUE;
-        // 3. Last frame, exceeded gradient, set to INITIAL
-//        double sum_val = 0;
-//        int sum_num = 0;
-//        int idx_up = vertex_set_[frm_idx - 1].GetVertexIdxByPos(x, y - kGridSize);
-//        if (idx_up > 0) {
-//          sum_val += vertex_set_[frm_idx - 1].vertex_val_(i)
-//                     - vertex_set_[frm_idx - 1].vertex_val_(idx_up);
-//          sum_num += 1;
-//        }
-//        int idx_dn = vertex_set_[frm_idx - 1].GetVertexIdxByPos(x, y + kGridSize);
-//        if (idx_dn > 0) {
-//          sum_val += vertex_set_[frm_idx - 1].vertex_val_(i)
-//                     - vertex_set_[frm_idx - 1].vertex_val_(idx_dn);
-//          sum_num += 1;
-//        }
-//        int idx_lf = vertex_set_[frm_idx - 1].GetVertexIdxByPos(x - kGridSize, y);
-//        if (idx_lf > 0) {
-//          sum_val += vertex_set_[frm_idx - 1].vertex_val_(i)
-//                     - vertex_set_[frm_idx - 1].vertex_val_(idx_lf);
-//          sum_num += 1;
-//        }
-//        int idx_rt = vertex_set_[frm_idx - 1].GetVertexIdxByPos(x + kGridSize, y);
-//        if (idx_rt > 0) {
-//          sum_val += vertex_set_[frm_idx - 1].vertex_val_(i)
-//                     - vertex_set_[frm_idx - 1].vertex_val_(idx_rt);
-//          sum_num += 1;
-//        }
-//        double grad = sum_val * 4 / sum_num;
-//        if (grad > 8.0)
-//          set_flag = my::INITIAL_TRUE;
-
-        vertex_set_[frm_idx].valid_(i) = set_flag;
-        if (set_flag == my::VERIFIED_TRUE) {
-          vertex_set_[frm_idx].vertex_val_.block(i, 0, 1, 4)
-              = vertex_set_[frm_idx - 1].vertex_val_.block(i, 0, 1, 4);
-        }
-      } else {
+      if (cam_set_[frm_idx].mask.at<uchar>(y, x) != my::VERIFIED_TRUE) {
         vertex_set_[frm_idx].vertex_val_(i, 0) = -1;
-        vertex_set_[frm_idx].valid_(i) = my::VERIFIED_FALSE;
-        if (frm_idx == 3 && x == 735 && y == 825) {
-//          std::cout << "VERIFIED_FALSE. " << i << std::endl;
-//          std::cout << vertex_set_[frm_idx].vertex_val_(i) << std::endl;
-//          std::cout << (int)vertex_set_[frm_idx].valid_(i) << std::endl;
+        vertex_set_[frm_idx].valid_(i, 0) = my::VERIFIED_FALSE;
+        continue;
+      }
+//      if (frm_idx == 3 && x == 735 && y == 825) {
+//        std::cout << "VERIFIED_TRUE." << std::endl;
+//      }
+      uchar set_flag = my::VERIFIED_TRUE;
+      // 1. Last frame, vertex is not valid, set INITIAL
+      if (vertex_set_[frm_idx - 1].valid_(i) != my::VERIFIED_TRUE)
+        set_flag = my::INITIAL_TRUE;
+      if (vertex_set_[frm_idx - 1].vertex_val_(i, 0) < 0)
+        set_flag = my::INITIAL_TRUE;
+      // 2. Last frame, mask is false, set to INITIAL
+      if (cam_set_[frm_idx - 1].mask.at<uchar>(y, x) != my::VERIFIED_TRUE)
+        set_flag = my::INITIAL_TRUE;
+      // 3. All above passed, check I_obs & I_est
+      if (set_flag == my::VERIFIED_TRUE) {
+        double max_est = 0.0;
+        double min_est = 255.0;
+        double max_obs = 0.0;
+        double min_obs = 255.0;
+        int points_num = 0;
+        for (int h = y - check_rad; h <= y + check_rad; h++) {
+          for (int w = x - check_rad; w <= x + check_rad; w++) {
+            if (cam_set_[frm_idx - 1].mask.at<uchar>(h, w) == my::VERIFIED_TRUE) {
+              points_num++;
+              double i_obs_k = (double)cam_set_[frm_idx - 1].img_obs.at<uchar>(h, w);
+              double i_est_k = (double)cam_set_[frm_idx - 1].img_est.at<uchar>(h, w);
+              max_est = (max_est > i_est_k) ? max_est : i_est_k;
+              min_est = (min_est < i_est_k) ? min_est : i_est_k;
+              max_obs = (max_obs > i_obs_k) ? max_obs : i_obs_k;
+              min_obs = (min_obs < i_obs_k) ? min_obs : i_obs_k;
+            }
+          }
         }
+        double pat_diff = 0.0;
+        double inten_diff = 0.0;
+        for (int h = y - check_rad; h <= y + check_rad; h++) {
+          for (int w = x - check_rad; w <= x + check_rad; w++) {
+            if (cam_set_[frm_idx - 1].mask.at<uchar>(h, w) == my::VERIFIED_TRUE) {
+              double i_obs_k = (double)cam_set_[frm_idx - 1].img_obs.at<uchar>(h, w);
+              double i_est_k = (double)cam_set_[frm_idx - 1].img_est.at<uchar>(h, w);
+              inten_diff += std::abs(i_obs_k - i_est_k);
+              double i_obs_k_n = (i_obs_k - min_obs) / (max_obs - min_obs);
+              double i_est_k_n = (i_est_k - min_est) / (max_est - min_est);
+              pat_diff += std::abs(i_obs_k_n - i_est_k_n);
+            }
+          }
+        }
+        pat_diff /= points_num;
+        inten_diff /= points_num;
+//          std::cout << pat_diff << " " << inten_diff << std::endl;
+        if (inten_diff*pat_diff > error_thred) {
+          set_flag = my::INITIAL_TRUE;
+//            printf("Found.\n");
+        }
+      }
+      vertex_set_[frm_idx].valid_(i) = set_flag;
+      if (set_flag == my::VERIFIED_TRUE) {
+        vertex_set_[frm_idx].vertex_val_.block(i, 0, 1, 4)
+            = vertex_set_[frm_idx - 1].vertex_val_.block(i, 0, 1, 4);
       }
     }
+
+    // Show
+    cv::Mat show_mat;
+    cam_set_[frm_idx - 1].img_est.copyTo(show_mat);
+    for (int i = 0; i < vertex_set_[frm_idx].len_; i++) {
+      int y = vertex_set_[frm_idx].pos_(i, 1);
+      int x = vertex_set_[frm_idx].pos_(i, 0);
+      if (vertex_set_[frm_idx].valid_(i) == my::INITIAL_TRUE) {
+//        std::cout << i << std::endl;
+        cv::rectangle(show_mat, cv::Point(x-5, y-5), cv::Point(x+5, y+5), 255, 1);
+      }
+    }
+    std::string valid_file_name = output_file_path_ + vertex_file_path_
+                                   + "valid_status" + Num2Str(frm_idx) + ".png";
+    cv::imwrite(valid_file_name, show_mat);
+
     // Fill valid mask: for every point with INITIAL_TRUE, find nearest point
     for (int i = 0; i < vertex_set_[frm_idx].len_; i++) {
       int w = vertex_set_[frm_idx].pos_(i, 0);
@@ -600,12 +616,12 @@ void Reconstructor::SetVertexFromBefore(int frm_idx) {
       vertex_set_[frm_idx].vertex_val_.block(i, 1, 1, 3) = norm_vec.transpose();
       vertex_set_[frm_idx].valid_(i) = my::VERIFIED_TRUE;
     }
-    for (int i = 0; i < vertex_set_[frm_idx].len_; i++) { // Check
-      if ((vertex_set_[frm_idx].valid_(i) == my::VERIFIED_TRUE)
-          && (vertex_set_[frm_idx].vertex_val_(i, 0) <= 0)) {
-        ErrorThrow("Vertex value less than 0. i=" + Num2Str(i));
-      }
-    }
+//    for (int i = 0; i < vertex_set_[frm_idx].len_; i++) { // Check
+//      if ((vertex_set_[frm_idx].valid_(i) == my::VERIFIED_TRUE)
+//          && (vertex_set_[frm_idx].vertex_val_(i, 0) <= 0)) {
+//        ErrorThrow("Vertex value less than 0. i=" + Num2Str(i));
+//      }
+//    }
 
 //    // Spread: 4
 //    uchar st1, st2, st3, st4;
@@ -840,12 +856,12 @@ bool Reconstructor::CalculateDepthMat(int frm_idx) {
       }
 //      std::cout << norm_k << std::endl;
       cam_set_[frm_idx].norm_vec.block<3, 1>(0, h * kCamWidth + w) = norm_k / norm_k.norm();
-//      cam_set_[frm_idx].depth.at<double>(h, w) = d_k;
-      if ((d_k >= kDepthMin) && (d_k <= kDepthMax)) {
-        cam_set_[frm_idx].depth.at<double>(h, w) = d_k;
-      } else {
-        cam_set_[frm_idx].mask.at<uchar>(h, w) = my::MARKED;
-      }
+      cam_set_[frm_idx].depth.at<double>(h, w) = d_k;
+//      if ((d_k >= kDepthMin) && (d_k <= kDepthMax)) {
+//        cam_set_[frm_idx].depth.at<double>(h, w) = d_k;
+//      } else {
+//        cam_set_[frm_idx].mask.at<uchar>(h, w) = my::MARKED;
+//      }
       if (h == 885 && w == 705) {
 //        std::cout << nb_idx_set << std::endl;
 //        printf("d_k = %f\n", d_k);
@@ -854,25 +870,25 @@ bool Reconstructor::CalculateDepthMat(int frm_idx) {
     }
   }
   // Interpolation
-  for (int h = 0; h < kCamHeight; h++) {
-    for (int w = 0; w < kCamWidth; w++) {
-      if (cam_set_[frm_idx].mask.at<uchar>(h, w) == my::MARKED) {
-        int search_rad = 5;
-        double sum_val = 0;
-        int sum_num = 0;
-        for (int d_h = -search_rad; d_h <= search_rad; d_h++) {
-          for (int d_w = -search_rad; d_w <= search_rad; d_w++) {
-            if (cam_set_[frm_idx].mask.at<uchar>(h+d_h, w+d_w) == my::VERIFIED_TRUE) {
-              sum_num++;
-              sum_val += cam_set_[frm_idx].depth.at<double>(h+d_h, w+d_w);
-            }
-          }
-        }
-        cam_set_[frm_idx].depth.at<double>(h, w) = sum_val / double(sum_num);
-        cam_set_[frm_idx].mask.at<uchar>(h, w) = my::VERIFIED_TRUE;
-      }
-    }
-  }
+//  for (int h = 0; h < kCamHeight; h++) {
+//    for (int w = 0; w < kCamWidth; w++) {
+//      if (cam_set_[frm_idx].mask.at<uchar>(h, w) == my::MARKED) {
+//        int search_rad = 5;
+//        double sum_val = 0;
+//        int sum_num = 0;
+//        for (int d_h = -search_rad; d_h <= search_rad; d_h++) {
+//          for (int d_w = -search_rad; d_w <= search_rad; d_w++) {
+//            if (cam_set_[frm_idx].mask.at<uchar>(h+d_h, w+d_w) == my::VERIFIED_TRUE) {
+//              sum_num++;
+//              sum_val += cam_set_[frm_idx].depth.at<double>(h+d_h, w+d_w);
+//            }
+//          }
+//        }
+//        cam_set_[frm_idx].depth.at<double>(h, w) = sum_val / double(sum_num);
+//        cam_set_[frm_idx].mask.at<uchar>(h, w) = my::VERIFIED_TRUE;
+//      }
+//    }
+//  }
 //  cv::namedWindow("depth" + Num2Str(frm_idx));
 //  cv::imshow("depth" + Num2Str(frm_idx), cam_set_[frm_idx].depth / 30);
 //  cv::waitKey(0);

@@ -51,6 +51,7 @@ struct CamMatSet {
   cv::Mat y_pro;
   cv::Mat depth;
   cv::Mat mask;
+  cv::Mat P; // Probability
   Eigen::Matrix<double, 3, Eigen::Dynamic> norm_vec;
 };
 

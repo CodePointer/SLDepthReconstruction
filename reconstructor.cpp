@@ -29,7 +29,7 @@ Reconstructor::~Reconstructor() {
 bool Reconstructor::Init() {
   bool status = true;
   // Set file path
-  main_file_path_ = "/home/pointer/CLionProjects/Data/20180313/Face_2Color_1/";
+  main_file_path_ = "/home/pointer/CLionProjects/Data/20180313/Hand_4Color_2/";
   pattern_file_name_ = "pattern_gauss";
   pattern_file_suffix_ = ".txt";
   dyna_file_path_ = "cam_0/dyna/";
@@ -138,38 +138,14 @@ bool Reconstructor::LoadDatasFromFiles() {
                                            + Num2Str(frm_idx)
                                            + dyna_file_suffix_,
                                            cv::IMREAD_GRAYSCALE);
-//    cam_set_[frm_idx].x_pro = LoadTxtToMat(main_file_path_
-//                                           + pro_file_path_
-//                                           + pro_file_name_
-//                                           + Num2Str(frm_idx)
-//                                           + pro_file_suffix_,
-//                                           kCamHeight, kCamWidth);
-//    cam_set_[frm_idx].y_pro = LoadTxtToMat(main_file_path_
-//                                           + pro_file_path_
-//                                           + "ypro_mat"
-//                                           + Num2Str(frm_idx)
-//                                           + pro_file_suffix_,
-//                                           kCamHeight, kCamWidth);
-//    printf("1\n");
-//    SetMaskMatFromXpro(frm_idx);
-//    ConvXpro2Depth(&cam_set_[frm_idx]);
-//    GenerateIest(frm_idx);
-//    cam_set_[frm_idx].img_est.copyTo(cam_set_[frm_idx].img_obs);
-//    cam_set_[frm_idx].img_est.setTo(0);
-//    cv::imwrite(main_file_path_ + dyna_file_path_ + dyna_file_name_
-//                + Num2Str(frm_idx) + dyna_file_suffix_,
-//                cam_set_[frm_idx].img_obs);
   }
   // Load first data: x_pro & depth
-  SetMaskMatFromIobs(0);
   cam_set_[0].x_pro = LoadTxtToMat(main_file_path_
                                        + pro_file_path_
                                        + pro_file_name_
                                        + Num2Str(0)
                                        + pro_file_suffix_,
                                        kCamHeight, kCamWidth);
-  ConvXpro2Depth(&cam_set_[0]);
-  SetVertexFromBefore(0);
   return true;
 }
 
@@ -238,8 +214,14 @@ void Reconstructor::ConvXpro2Depth(CamMatSet *ptr_cam_set) {
 
 bool Reconstructor::Run() {
   bool status = true;
+
+  // First frame (frame 0):
+  SetMaskMatFromIobs(0);
+  ConvXpro2Depth(&cam_set_[0]);
+  SetVertexFromBefore(0);
   CalculateDepthMat(0);
   GenerateIest(0);
+//  FixImageProbability(0);
 
   std::string I_est_name = output_file_path_ + "I_est" + Num2Str(0) + ".png";
   cv::imwrite(I_est_name, cam_set_[0].img_est);
@@ -303,6 +285,11 @@ bool Reconstructor::Run() {
     // Calculate Estimated Image from depth mat
     if (status)
       status = GenerateIest(frm_idx);
+//    // Use KF to fix depth info
+//    if (status)
+//      status = FixImageProbability(frm_idx);
+//    if (status)
+//      status = GenerateIest(frm_idx);
     // Write result to file
     if (status)
       status = WriteResult(frm_idx);
@@ -944,6 +931,33 @@ bool Reconstructor::GenerateIest(int frm_idx) {
 
   std::string norm_mat_name = output_file_path_ + "I_norm" + Num2Str(frm_idx) + ".png";
   cv::imwrite(norm_mat_name, norm_mat);
+  return status;
+}
+
+bool Reconstructor::FixImageProbability(int frm_idx) {
+  bool status = true;
+
+  double R = 2.0;
+  double Q = 1.0;
+  if (frm_idx == 0) {
+    cam_set_[frm_idx].P.create(kCamHeight, kCamWidth, CV_64FC1);
+    cam_set_[frm_idx].P.setTo(2.0);
+  } else {
+    cam_set_[frm_idx].P = cam_set_[frm_idx - 1].P + R;
+    for (int h = 0; h < kCamHeight; h++) {
+      for (int w = 0; w < kCamWidth; w++) {
+        double i_obs = (double)cam_set_[frm_idx].img_obs.at<uchar>(h, w);
+        double i_est = (double)cam_set_[frm_idx].img_est.at<uchar>(h, w);
+        double d_k = cam_set_[frm_idx].depth.at<double>(h, w);
+        double P_k = cam_set_[frm_idx].P.at<double>(h, w);
+        double L_k = i_est / d_k;
+        double K = P_k*L_k / (L_k*P_k*L_k + Q);
+        cam_set_[frm_idx].P.at<double>(h, w) = (1 - K*L_k) * P_k;
+        cam_set_[frm_idx].depth.at<double>(h, w) = d_k + K*(i_obs - i_est);
+      }
+    }
+  }
+
   return status;
 }
 

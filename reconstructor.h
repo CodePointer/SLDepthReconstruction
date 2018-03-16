@@ -89,6 +89,7 @@ private:
   bool OptimizeVertexSet(int frm_idx);
   bool CalculateDepthMat(int frm_idx);
   bool GenerateIest(int frm_idx);
+  bool FixImageProbability(int frm_idx);
   bool WriteResult(int frm_idx);
 
 public:

@@ -15,9 +15,13 @@
 #include <ceres/ceres.h>
 #include <ceres/cubic_interpolation.h>
 #include "deform_constraint.h"
+#include <sys/time.h>
+#include "intensity_slot.h"
 //#include "deform_cost_functor.h"
 #include "regular_constraint.h"
 //#include "regular_cost_functor.h"
+
+static timeval g_time_last;
 
 class Reconstructor {
 private:
@@ -57,6 +61,7 @@ private:
   ////////////////////////////////////////////////////////////////
   CalibSet calib_set_;
   CamMatSet * cam_set_;
+  CamSlotsMat * cam_slots_;
   VertexSet * vertex_set_;
   cv::Mat pattern_;
   cv::Mat epi_A_mat_;
@@ -79,12 +84,29 @@ private:
   /// Optimization part. Related parameters.
   ////////////////////////////////////////////////////////////////
   ceres::BiCubicInterpolator<ceres::Grid2D<double, 1>> * pat_grid_;
+  double inten_thred_;
 
   // Functions:
   bool LoadDatasFromFiles();
   void ConvXpro2Depth(CamMatSet * ptr_cam_set);
   void SetMaskMatFromXpro(int frm_idx);
+
+  void SetFirstFrameVertex(int frm_idx);
+
   void SetMaskMatFromIobs(int frm_idx);
+  void PredictInitialShadeVal(int frm_idx);
+  void FillShadeMatFromVertex(int frm_idx);
+  void RecoIntensityClass(int frm_idx);
+  void GenerateIntensitySlots(int frm_idx);
+  void PredictInitialDepthVal(int frm_idx);
+  void RefineInitialDepthVal(int frm_idx);
+  void OptimizeDepthMat(int frm_idx);
+  void GenerateIestFromDepth(int frm_idx);
+  void OptimizeShadingMat(int frm_idx);
+  void OutputResult(int frm_idx);
+
+  void UpdateVertexFrame(int frm_idx);
+  void NormalizeIobs(int frm_idx);
   void SetVertexFromBefore(int frm_idx);
   bool OptimizeVertexSet(int frm_idx);
   bool CalculateDepthMat(int frm_idx);

@@ -12,6 +12,7 @@ VertexSet::VertexSet() {
   vertex_val_
       = Eigen::Matrix<double, Eigen::Dynamic, 4, Eigen::RowMajor>::Zero(len_, 4);
   pos_ = Eigen::Matrix<int, Eigen::Dynamic, 2>::Zero(len_, 2);
+  frm_ = Eigen::Matrix<int, Eigen::Dynamic, 1>::Zero(len_, 1);
   valid_ = Eigen::Matrix<uchar, Eigen::Dynamic, 1>::Zero(len_, 1);
   for (int h = 0; h < block_height_; h++) {
     for (int w = 0; w < block_width_; w++) {
@@ -21,6 +22,7 @@ VertexSet::VertexSet() {
       vertex_val_(idx_i) = -1.0;
       pos_(idx_i, 0) = x;
       pos_(idx_i, 1) = y;
+      frm_(idx_i) = 0;
       valid_(idx_i) = my::VERIFIED_FALSE;
     }
   }

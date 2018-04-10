@@ -3,10 +3,15 @@
 //
 
 
+#include <spatial_constraint.h>
+#include <temporal_constraint.h>
+#include <shade_data_constraint.h>
+#include <intensity_slot.h>
 #include "reconstructor.h"
 
 Reconstructor::Reconstructor() {
   cam_set_ = nullptr;
+  cam_slots_ = nullptr;
   vertex_set_ = nullptr;
   pat_grid_ = nullptr;
 }
@@ -15,6 +20,10 @@ Reconstructor::~Reconstructor() {
   if (cam_set_ != nullptr) {
     delete[]cam_set_;
     cam_set_ = nullptr;
+  }
+  if (cam_slots_ != nullptr) {
+    delete[]cam_slots_;
+    cam_slots_ = nullptr;
   }
   if (vertex_set_ != nullptr) {
     delete[]vertex_set_;
@@ -28,8 +37,12 @@ Reconstructor::~Reconstructor() {
 
 bool Reconstructor::Init() {
   bool status = true;
+
+  LOG(INFO) << "Reconstructor::Init start.";
+  gettimeofday(&g_time_last, nullptr);
+
   // Set file path
-  main_file_path_ = "/home/pointer/CLionProjects/Data/20180313/Hand_4Color_2/";
+  main_file_path_ = "/home/pointer/CLionProjects/Data/20180313/Hand_2Color_2/";
   pattern_file_name_ = "pattern_gauss";
   pattern_file_suffix_ = ".txt";
   dyna_file_path_ = "cam_0/dyna/";
@@ -57,16 +70,19 @@ bool Reconstructor::Init() {
 
   // Load Informations
   status = LoadDatasFromFiles();
+  inten_thred_ = 120.0;
   // Set pattern grid
 
 //  cv::namedWindow("pattern");
 //  cv::imshow("pattern", pattern_ / 255.0);
 //  cv::waitKey(0);
 //  cv::destroyWindow("pattern");
+  LOG(INFO) << "Reconstructor::Init finished.";
   return status;
 }
 
 bool Reconstructor::LoadDatasFromFiles() {
+  LOG(INFO) << "Loading data from harddisk.";
   // Calib_Set:M, D, cam_0, cam_1
   LoadTxtToEigen(main_file_path_ + cam_matrix_name_, 3, 3, calib_set_.cam.data());
   LoadTxtToEigen(main_file_path_ + pro_matrix_name_, 3, 3, calib_set_.pro.data());
@@ -130,6 +146,7 @@ bool Reconstructor::LoadDatasFromFiles() {
 
   // Cam_set
   cam_set_ = new CamMatSet[kFrameNum];
+  cam_slots_ = new CamSlotsMat[kFrameNum];
   vertex_set_ = new VertexSet[kFrameNum];
   for (int frm_idx = 0; frm_idx < kFrameNum; frm_idx++) {
     cam_set_[frm_idx].img_obs = cv::imread(main_file_path_
@@ -146,17 +163,18 @@ bool Reconstructor::LoadDatasFromFiles() {
                                        + Num2Str(0)
                                        + pro_file_suffix_,
                                        kCamHeight, kCamWidth);
+  LOG(INFO) << "Loading data finished.";
   return true;
 }
 
 void Reconstructor::ConvXpro2Depth(CamMatSet *ptr_cam_set) {
+  LOG(INFO) << "Start: ConvXpro2Depth()";
   ptr_cam_set->depth.create(kCamHeight, kCamWidth, CV_64FC1);
   Eigen::Vector3d vec_D = calib_set_.D;
   for (int h = 0; h < kCamHeight; h++) {
     for (int w = 0; w < kCamWidth; w++) {
       if (ptr_cam_set->mask.at<uchar>(h, w) != my::VERIFIED_TRUE)
         continue;
-      int idx_k = h * kCamWidth + w;
       double x_pro = ptr_cam_set->x_pro.at<double>(h, w);
       if (x_pro < 0) {
         if ((ptr_cam_set->x_pro.at<double>(h, w - 1) > 0)
@@ -176,9 +194,7 @@ void Reconstructor::ConvXpro2Depth(CamMatSet *ptr_cam_set) {
           continue;
         }
       }
-      Eigen::Vector3d vec_M = calib_set_.M.block<3, 1>(0, idx_k);
-      double depth = - (vec_D(0) - vec_D(2) * x_pro)
-                     / (vec_M(0) - vec_M(2) * x_pro);
+      double depth = GetDepthFromXpro(x_pro, h, w, &calib_set_);
       if ((depth < kDepthMin) || (depth > kDepthMax)) {
         ptr_cam_set->depth.at<double>(h, w) = -1;
         ptr_cam_set->mask.at<uchar>(h, w) = my::MARKED;
@@ -210,89 +226,66 @@ void Reconstructor::ConvXpro2Depth(CamMatSet *ptr_cam_set) {
 //  cv::namedWindow("test");
 //  cv::imshow("test", (ptr_cam_set->depth/100));
 //  cv::waitKey(0);
+  LOG(INFO) << "End: ConvXpro2Depth()";
 }
 
 bool Reconstructor::Run() {
   bool status = true;
 
+  LOG(INFO) << "Reconstruction process start.";
+
   // First frame (frame 0):
+  LOG(INFO) << "First frame process start.";
   SetMaskMatFromIobs(0);
   ConvXpro2Depth(&cam_set_[0]);
-  SetVertexFromBefore(0);
-  CalculateDepthMat(0);
-  GenerateIest(0);
-//  FixImageProbability(0);
+  SetFirstFrameVertex(0);
+  FillShadeMatFromVertex(0);
+  // <-debug
+  std::string shade_txt_name
+      = output_file_path_ + "shade_init" + Num2Str(0) + ".txt";
+  status = SaveMatToTxt(shade_txt_name, cam_set_[0].shade_mat);
+  if (status) LOG(INFO) << shade_txt_name << " success.";
+  // debug->
+  RecoIntensityClass(0);
+  GenerateIestFromDepth(0);
+  OptimizeShadingMat(0);
+  FillShadeMatFromVertex(0);
+  GenerateIestFromDepth(0);
+  OutputResult(0);
+  LOG(INFO) << "First frame process finished.";
 
-  std::string I_est_name = output_file_path_ + "I_est" + Num2Str(0) + ".png";
-  cv::imwrite(I_est_name, cam_set_[0].img_est);
-
+  // Further frame:
   for (int frm_idx = 1; (frm_idx < kFrameNum) && status; frm_idx++) {
-    std::cout << "Frame " << frm_idx << ":" << std::endl;
-    // Set a mask according to I_obs
+    LOG(INFO) << "Frame (" << frm_idx << ") processing";
+    std::cout << "Frame (" << frm_idx << "):" << std::endl;
+
     SetMaskMatFromIobs(frm_idx);
+    PredictInitialDepthVal(frm_idx);
 
-    // I_obs -> binary
-//    cv::Mat tmp_obs;
-//    int blur_size = 11;
-//    cam_set_[frm_idx].img_obs.copyTo(tmp_obs);
-//    for (int h = 0; h < kCamHeight; h++) {
-//      for (int w = 0; w < kCamWidth; w++) {
-//        if (cam_set_[frm_idx].mask.at<uchar>(h, w) == my::VERIFIED_TRUE) {
-//          double sum_val = 0;
-//          int sum_num = 0;
-//          for (int dh = -blur_size; dh <= blur_size; dh++) {
-//            for (int dw = -blur_size; dw <= blur_size; dw++) {
-//              int h_n = h + dh;
-//              int w_n = w + dw;
-//              if ((h_n < 0) || (h_n >= kCamHeight) || (w_n < 0) || (w_n >= kCamWidth))
-//                continue;
-//              if (cam_set_[frm_idx].mask.at<uchar>(h_n, w_n) == my::VERIFIED_TRUE) {
-//                sum_num++;
-//                sum_val += double(tmp_obs.at<uchar>(h_n, w_n));
-//              }
-//            }
-//          }
-//          double val = double(cam_set_[frm_idx].img_obs.at<uchar>(h, w));
-//          double avr_val = sum_val / sum_num;
-//          if (val > avr_val) {
-//            cam_set_[frm_idx].img_obs.at<uchar>(h, w) = 1;
-//          } else {
-//            cam_set_[frm_idx].img_obs.at<uchar>(h, w) = 0;
-//          }
-//        }
-//      }
-//    }
-//    cv::namedWindow("I_obs" + Num2Str(frm_idx));
-//    cv::imshow("I_obs" + Num2Str(frm_idx), cam_set_[frm_idx].img_obs);
-//    cv::waitKey(200);
-//    cv::destroyWindow("I_obs" + Num2Str(frm_idx));
+    PredictInitialShadeVal(frm_idx);
+    FillShadeMatFromVertex(frm_idx);
 
-    // Set vertex initial value
-    SetVertexFromBefore(frm_idx);
-    CalculateDepthMat(frm_idx);
-//    SaveValToTxt("vertex_before.txt", vertex_set_[frm_idx].vertex_val_,
-//                 vertex_set_[frm_idx].block_height_,
-//                 vertex_set_[frm_idx].block_width_);
-    // Optimization
-    if (status)
-      status = OptimizeVertexSet(frm_idx);
-//    SaveValToTxt("vertex_after.txt", vertex_set_[frm_idx].vertex_val_,
-//                 vertex_set_[frm_idx].block_height_,
-//                 vertex_set_[frm_idx].block_width_);
-    // Build up depth mat from mask
-    if (status)
-      status = CalculateDepthMat(frm_idx);
-    // Calculate Estimated Image from depth mat
-    if (status)
-      status = GenerateIest(frm_idx);
-//    // Use KF to fix depth info
-//    if (status)
-//      status = FixImageProbability(frm_idx);
-//    if (status)
-//      status = GenerateIest(frm_idx);
-    // Write result to file
-    if (status)
-      status = WriteResult(frm_idx);
+    RecoIntensityClass(frm_idx);
+
+    GenerateIntensitySlots(frm_idx);
+
+    RefineInitialDepthVal(frm_idx);
+
+    LOG(INFO) << "Begin opt depth.";
+    OptimizeDepthMat(frm_idx);
+    LOG(INFO) << "Finish opt depth.";
+
+    GenerateIestFromDepth(frm_idx);
+
+    LOG(INFO) << "Begin opt shading.";
+    OptimizeShadingMat(frm_idx);
+    LOG(INFO) << "Finish opt shading.";
+    FillShadeMatFromVertex(frm_idx);
+
+    GenerateIestFromDepth(frm_idx);
+
+    OutputResult(frm_idx);
+    LOG(INFO) << "Frame " << frm_idx << "finished.";
   }
   return status;
 }
@@ -315,7 +308,60 @@ void Reconstructor::SetMaskMatFromXpro(int frm_idx) {
   }
 }
 
+// Set first frame's vertex_set
+void Reconstructor::SetFirstFrameVertex(int frm_idx) {
+  LOG(INFO) << "Start: SetFirstFrameVertex(" << frm_idx << ");";
+  if (frm_idx != 0) {
+    LOG(ERROR) << "frm_idx != 0 : " << frm_idx;
+    return;
+  }
+  cv::Mat gauss_depth;
+  cv::GaussianBlur(cam_set_[frm_idx].depth, gauss_depth, cv::Size(3, 3), 3.0);
+  double fx = calib_set_.cam_mat(0, 0);
+  double fy = calib_set_.cam_mat(1, 1);
+  double dx = calib_set_.cam_mat(0, 2);
+  double dy = calib_set_.cam_mat(1, 2);
+  Eigen::Vector3d D = calib_set_.D;
+  for (int i = 0; i < vertex_set_[frm_idx].len_; i++) {
+    int x = vertex_set_[frm_idx].pos_(i, 0);
+    int y = vertex_set_[frm_idx].pos_(i, 1);
+    if (cam_set_[frm_idx].mask.at<uchar>(y + 1, x + 1) == my::VERIFIED_TRUE
+        && cam_set_[frm_idx].mask.at<uchar>(y + 1, x) == my::VERIFIED_TRUE
+        && cam_set_[frm_idx].mask.at<uchar>(y, x + 1) == my::VERIFIED_TRUE
+        && cam_set_[frm_idx].mask.at<uchar>(y, x) == my::VERIFIED_TRUE) {
+      Eigen::Vector3d tmp_hw, tmp_h1w, tmp_hw1, tmp_h1w1;
+      Eigen::Vector3d obj_hw, obj_h1w, obj_hw1, obj_h1w1;
+      tmp_hw << (x - dx) / fx, (y - dy) / fy, 1.0;
+      tmp_h1w << (x - dx) / fx, (y + 1 - dy) / fy, 1.0;
+      tmp_hw1 << (x + 1 - dx) / fx, (y - dy) / fy, 1.0;
+      tmp_h1w1 << (x + 1 - dx) / fx, (y + 1 - dy) / fy, 1.0;
+      obj_hw = gauss_depth.at<double>(y, x) * tmp_hw;
+      obj_h1w = gauss_depth.at<double>(y + 1, x) * tmp_h1w;
+      obj_hw1 = gauss_depth.at<double>(y, x + 1) * tmp_hw1;
+      obj_h1w1 = gauss_depth.at<double>(y + 1, x + 1) * tmp_h1w1;
+      Eigen::Vector3d vec_ul2dr, vec_dl2ur;
+      vec_ul2dr = obj_h1w1 - obj_hw;
+      vec_dl2ur = obj_hw1 - obj_h1w;
+      Eigen::Vector3d norm_vec = vec_ul2dr.cross(vec_dl2ur);
+      norm_vec = norm_vec / norm_vec.norm();
+
+//      vertex_set_[frm_idx].vertex_val_(i, 0)
+//          = cam_set_[frm_idx].depth.at<double>(y, x);
+      double norm_weight = norm_vec.transpose() * calib_set_.light_vec_;
+      if (norm_weight < 0)
+        norm_weight = - norm_weight;
+      vertex_set_[frm_idx].vertex_val_(i, 0) = norm_weight;
+
+      vertex_set_[frm_idx].vertex_val_.block(i, 1, 1, 3) = norm_vec.transpose();
+      vertex_set_[frm_idx].valid_(i) = my::VERIFIED_TRUE;
+    }
+  }
+  LOG(INFO) << "End: SetFirstFrameVertex(" << frm_idx << ");";
+}
+
+// Set Mask mat according to pixel from I_obs
 void Reconstructor::SetMaskMatFromIobs(int frm_idx) {
+  LOG(INFO) << "Start: SetMaskMatFromIobs(" << frm_idx << ");";
   cam_set_[frm_idx].mask.create(kCamHeight, kCamWidth, CV_8UC1);
   // Set mask initial value by intensity:
   //   my::INITIAL_FALSE for dark part
@@ -371,40 +417,582 @@ void Reconstructor::SetMaskMatFromIobs(int frm_idx) {
       }
     }
   }
+  LOG(INFO) << "End: SetMaskMatFromIobs(" << frm_idx << ");";
+}
 
+// Set vertex_set from last frm
+void Reconstructor::PredictInitialShadeVal(int frm_idx) {
+  LOG(INFO) << "Start: PredictInitialShadeVal(" << frm_idx << ");";
+  // v_i(t) = v_i(t-1), for most has history vertex
+  for (int i = 0; i < vertex_set_[frm_idx].len_; i++) {
+    int x = vertex_set_[frm_idx].pos_(i, 0);
+    int y = vertex_set_[frm_idx].pos_(i, 1);
+    if (cam_set_[frm_idx].mask.at<uchar>(y, x) != my::VERIFIED_TRUE) {
+      vertex_set_[frm_idx].vertex_val_(i, 0) = -1;
+      vertex_set_[frm_idx].valid_(i, 0) = my::VERIFIED_FALSE;
+      continue;
+    }
+
+    // If last frame has vertex_value, v_i(t) = v_i(t-1)
+    if (vertex_set_[frm_idx - 1].valid_(i) == my::VERIFIED_TRUE) {
+      vertex_set_[frm_idx].valid_(i) = my::VERIFIED_TRUE;
+      vertex_set_[frm_idx].vertex_val_.block(i, 0, 1, 4)
+          = vertex_set_[frm_idx - 1].vertex_val_.block(i, 0, 1, 4);
+    } else {
+      vertex_set_[frm_idx].valid_(i) = my::INITIAL_TRUE;
+    }
+  }
+  // Find nearest vertex
+  for (int i = 0; i < vertex_set_[frm_idx].len_; i++) {
+    int x = vertex_set_[frm_idx].pos_(i, 0);
+    int y = vertex_set_[frm_idx].pos_(i, 1);
+    if (vertex_set_[frm_idx].valid_(i) != my::INITIAL_TRUE) {
+      continue;
+    }
+    Eigen::Matrix<double, Eigen::Dynamic, 2> vertex_nbr
+        = vertex_set_[frm_idx].FindkNearestVertex(x, y, 2);
+    int idx_nbr = (int)vertex_nbr(1, 0);
+    vertex_set_[frm_idx].vertex_val_.block(i, 0, 1, 4)
+        = vertex_set_[frm_idx].vertex_val_.block(idx_nbr, 0, 1, 4);
+  }
+
+  for (int i = 0; i < vertex_set_[frm_idx].len_; i++) {
+    int x = vertex_set_[frm_idx].pos_(i, 0);
+    int y = vertex_set_[frm_idx].pos_(i, 1);
+    if (vertex_set_[frm_idx].valid_(i) == my::INITIAL_TRUE) {
+      vertex_set_[frm_idx].valid_(i) = my::VERIFIED_TRUE;
+    }
+  }
+  LOG(INFO) << "End: PredictInitialShadeVal(" << frm_idx << ");";
+}
+
+// Fill shade_mat from vertex_set
+void Reconstructor::FillShadeMatFromVertex(int frm_idx) {
+  LOG(INFO) << "Start: FillShadeMatFromVertex(" << frm_idx << ");";
+  cam_set_[frm_idx].shade_mat.create(kCamHeight, kCamWidth, CV_64FC1);
+  cam_set_[frm_idx].shade_mat.setTo(0);
+  for (int h = 0; h < kCamHeight; h++) {
+    for (int w = 0; w < kCamWidth; ++w) {
+      if (cam_set_[frm_idx].mask.at<uchar>(h, w) != my::VERIFIED_TRUE)
+        continue;
+      Eigen::Matrix<double, Eigen::Dynamic, 2> vertex_nbr
+          = vertex_set_[frm_idx].FindkNearestVertex(w, h, kNearestPoints + 1);
+      Eigen::Matrix<double, Eigen::Dynamic, 1> weight
+          = Eigen::Matrix<double, Eigen::Dynamic, 1>::Zero(kNearestPoints, 1);
+      double sum_val = 0;
+      for (int i = 0; i < kNearestPoints; i++) {
+        weight(i) = pow((1 - vertex_nbr(i, 1) / vertex_nbr(kNearestPoints, 1)), 2);
+        sum_val += weight(i);
+      }
+      weight = weight / suqm_val;
+      double shade_val = 0;
+      for (int i = 0; i < kNearestPoints; i++) {
+        int idx_nbr = vertex_nbr(i, 0);
+//        double vertex_val = vertex_set_[frm_idx].vertex_val_(idx_nbr, 0);
+//        double weight_t = weight(i);
+        shade_val += weight(i) * vertex_set_[frm_idx].vertex_val_(idx_nbr, 0);
+      }
+      cam_set_[frm_idx].shade_mat.at<double>(h, w) = shade_val;
+    }
+  }
+//  ShowMat(&cam_set_[frm_idx].shade_mat, "shade_mat", 0, 0.0, 1.0);
+  LOG(INFO) << "End: FillShadeMatFromVertex(" << frm_idx << ");";
+}
+
+// Classify intensity class.
+void Reconstructor::RecoIntensityClass(int frm_idx) {
+  LOG(INFO) << "Start: RecoIntensityClass(" << frm_idx << ")";
+  cam_set_[frm_idx].img_class.create(kCamHeight, kCamWidth, CV_8UC1);
+  cam_set_[frm_idx].img_class.setTo(0);
+  for (int h = 0; h < kCamHeight; h++) {
+    for (int w = 0; w < kCamWidth; w++) {
+      if (cam_set_[frm_idx].mask.at<uchar>(h, w) != my::VERIFIED_TRUE) {
+        continue;
+      }
+      double norm_weight = cam_set_[frm_idx].shade_mat.at<double>(h, w);
+      double img_k = (double)cam_set_[frm_idx].img_obs.at<uchar>(h, w);
+
+//      if (h == 705 && w == 670) {
+//        LOG(INFO) << "Here.";
+//      }
+
+      // Check
+      if (img_k / norm_weight > inten_thred_) {
+        cam_set_[frm_idx].img_class.at<uchar>(h, w) = 1;
+      } else {
+        cam_set_[frm_idx].img_class.at<uchar>(h, w) = 0;
+      }
+    }
+  }
+  LOG(INFO) << "End: RecoIntensityClass(" << frm_idx << ")";
+}
+
+// According to frm_idx-1 's depth, create nearby IntensitySlots.
+void Reconstructor::GenerateIntensitySlots(int frm_idx) {
+  LOG(INFO) << "Start: GenerateIntensitySlots(" << frm_idx << ")";
+  if ((frm_idx <= 0) || frm_idx >= kFrameNum) {
+    LOG(ERROR) << "Invalid frm_idx: " << frm_idx;
+    return;
+  }
+  for (int h = 0; h < kCamHeight; h++) {
+    for (int w = 0; w < kCamWidth; w++) {
+      if (cam_set_[frm_idx].mask.at<uchar>(h, w) != my::VERIFIED_TRUE) {
+        continue;
+      }
+
+//      if (h == 705 && w == 670) {
+//        LOG(INFO) << "Here."; // TODO: An output style may be useful.
+//      }
+
+      // Initial depth
+      double initial_depth = cam_set_[frm_idx].depth.at<double>(h, w);
+      double depth_start = initial_depth - kDepthRad;
+      double depth_end = initial_depth + kDepthRad;
+      double xpro_start = GetXproFromDepth(depth_start, h, w, &calib_set_);
+      double xpro_end = GetXproFromDepth(depth_end, h, w, &calib_set_);
+
+      // Create slots for pixel
+      int last_c = -1;
+      cam_slots_[frm_idx].slots_[h][w] = new IntensitySlot[kIntensityClassNum];
+      DepthSegment tmp_seg[2];
+      for (int x = (int) xpro_start; x <= (int) (xpro_end + 1); x++) {
+        if (x < 0 || x >= kProWidth)
+          continue;
+        int y = (int) GetYproFromXpro(x, h, w, epi_A_mat_, epi_B_mat_);
+        double pat_val = pattern_.at<double>(y, x);
+        int now_c = pat_val >= inten_thred_ ? 1 : 0;
+        if (last_c < 0) {
+          double divide_depth = GetDepthFromXpro(x, h, w, &calib_set_);
+          tmp_seg[now_c].start = divide_depth;
+          last_c = now_c;
+        } else if (last_c != now_c) {
+          double divide_depth = GetDepthFromXpro(x - 0.5, h, w, &calib_set_);
+          tmp_seg[last_c].end = divide_depth;
+          cam_slots_[frm_idx].slots_[h][w][last_c].InsertSegment(tmp_seg[last_c]);
+
+          tmp_seg[last_c].Clear();
+          tmp_seg[now_c].start = divide_depth;
+          last_c = now_c;
+//          if (x < (int) (xpro_end + 1)) {
+//            tmp_seg[last_c].Clear();
+//            tmp_seg[now_c].start = divide_depth;
+//            last_c = now_c;
+//          }
+        }
+      }
+      if (last_c < 0) {
+        LOG(ERROR) << "No valid pattern found.";
+      }
+      double divide_depth = GetDepthFromXpro((int)(xpro_end + 1), h, w, &calib_set_);
+      tmp_seg[last_c].end = divide_depth;
+      cam_slots_[frm_idx].slots_[h][w][last_c].InsertSegment(tmp_seg[last_c]);
+//      std::cout << cam_slots_[frm_idx].slots_[h][w][0].OutputSlot() << std::endl;
+//      std::cout << cam_slots_[frm_idx].slots_[h][w][1].OutputSlot() << std::endl;
+//      last_c = -1;
+    }
+  }
+  LOG(INFO) << "End: GenerateIntensitySlots(" << frm_idx << ")";
+}
+
+// Fill initial depth val for every pixel (Without intensity constraint)
+void Reconstructor::PredictInitialDepthVal(int frm_idx) {
+  LOG(INFO) << "Start: PredictInitialDepthVal(" << frm_idx << ")";
+  if ((frm_idx <= 0) || frm_idx >= kFrameNum) {
+    LOG(ERROR) << "Invalid frm_idx: " << frm_idx;
+    return;
+  }
+  cam_set_[frm_idx].depth.create(kCamHeight, kCamWidth, CV_64FC1);
+  //cam_set_[frm_idx].shade_mat.create(kCamHeight, kCamWidth, CV_64FC1);
+  double error_thred = 6.0;
+  int check_rad = 5;
+  for (int h = 0; h < kCamHeight; ++h) {
+    for (int w = 0; w < kCamWidth; ++w) {
+      if (cam_set_[frm_idx].mask.at<uchar>(h, w) != my::VERIFIED_TRUE) {
+        cam_set_[frm_idx].depth.at<double>(h, w) = -1;
+        continue;
+      }
+      // 1. d_k(t-1) has value, d_k(t) = d_k(t-1)
+      if (cam_set_[frm_idx-1].mask.at<uchar>(h, w) == my::VERIFIED_TRUE) {
+        cam_set_[frm_idx].depth.at<double>(h, w)
+            = cam_set_[frm_idx-1].depth.at<double>(h, w);
+        continue;
+      }
+      // 2. d_k(t-1) does not have value. Find nearest point in d(t-1).
+      int rad = 1;
+      bool break_flag = false;
+      double depth_val = -1;
+      //double norm_weight = -1;
+      int h_s = h - rad;
+      int w_s = w - rad;
+      while (!break_flag) {
+        // Check
+        if (cam_set_[frm_idx - 1].mask.at<uchar>(h_s, w_s) == my::VERIFIED_TRUE) {
+          depth_val = cam_set_[frm_idx - 1].depth.at<double>(h_s, w_s);
+          //norm_weight = cam_set_[frm_idx - 1].shade_mat.at<double>(h_s, w_s);
+          break_flag = true;
+          continue;
+        }
+        // Next
+        if (h_s == h - rad && w_s < w + rad) {
+          w_s++;
+        } else if (w_s == w + rad && h_s < h + rad) {
+          h_s++;
+        } else if (h_s == h + rad && w_s > w - rad) {
+          w_s--;
+        } else if (w_s == w - rad && h_s > h - rad + 1) {
+          h_s--;
+        } else if (h_s == h - rad + 1 && w_s == w - rad) {
+          rad++;
+          h_s = h - rad;
+          w_s = w - rad;
+        } else {
+          LOG(ERROR) << "Logic problem.";
+        }
+      }
+      cam_set_[frm_idx].depth.at<double>(h, w) = depth_val;
+//      //cam_set_[frm_idx].shade_mat.at<double>(h, w) = norm_weight;
+//      int c_idx = cam_set_[frm_idx].img_class.at<uchar>(h, w);
+//      cam_set_[frm_idx].pointer(h, w)
+//          = cam_slots_[frm_idx].slots_[h][w][c_idx].GetNearestPointerFromDepth(
+//          depth_val);
+//      cam_set_[frm_idx].depth.at<double>(h, w)
+//          = cam_slots_[frm_idx].slots_[h][w][c_idx].GetDepthFromPointer(
+//          cam_set_[frm_idx].pointer(h, w));
+    }
+  }
+//  ShowMat(&cam_set_[frm_idx].depth, "Depth_Init", 0, 25.0, 35.0);
+  LOG(INFO) << "End: PredictInitialDepthVal(" << frm_idx << ")";
+}
+
+// Set depth val with intensity constraint
+void Reconstructor::RefineInitialDepthVal(int frm_idx) {
+  LOG(INFO) << "Start: RefineInitialDepthVal(" << frm_idx << ")";
+  cam_set_[frm_idx].pointer = ImgMatrix::Zero(kCamHeight, kCamWidth);
+  for (int h = 0; h < kCamHeight; h++) {
+    for (int w = 0; w < kCamWidth; w++) {
+      if (cam_set_[frm_idx].mask.at<uchar>(h, w) != my::VERIFIED_TRUE)
+        continue;
+      double depth = cam_set_[frm_idx].depth.at<double>(h, w);
+      int c = cam_set_[frm_idx].img_class.at<uchar>(h, w);
+//      if (h == 584 && w == 837) {
+//        std::cout << cam_slots_[frm_idx].slots_[h][w][c].OutputSlot() << std::endl;
+//        std::cout << cam_slots_[frm_idx].slots_[h][w][c].OutputBias() << std::endl;
+//      }
+      cam_set_[frm_idx].pointer(h, w)
+          = cam_slots_[frm_idx].slots_[h][w][c].GetNearestPointerFromDepth(depth);
+      if (cam_set_[frm_idx].pointer(h, w) < 0) {
+        LOG(ERROR) << "Empty slot at: " << h << "," << w << "," << c; // TODO: 705, 670, 0
+        cam_set_[frm_idx].mask.at<uchar>(h, w) = my::VERIFIED_FALSE;
+        cam_set_[frm_idx].depth.at<double>(h, w) = -1;
+        continue;
+      }
+      cam_set_[frm_idx].depth.at<double>(h, w)
+          = cam_slots_[frm_idx].slots_[h][w][c].GetDepthFromPointer(
+          cam_set_[frm_idx].pointer(h, w));
+    }
+  }
+  // Output
+  std::string depth_txt_name
+      = output_file_path_ + "depth_init"
+        + Num2Str(frm_idx) + ".txt";
+  SaveMatToTxt(depth_txt_name, cam_set_[frm_idx].depth);
+
+  LOG(INFO) << "End: RefineInitialDepthVal(" << frm_idx << ")";
+}
+
+// Optimize Depth mat by spatial & temporal info
+void Reconstructor::OptimizeDepthMat(int frm_idx) {
+  LOG(INFO) << "Start: OptimizeDepthMat(" << frm_idx << ")";
+  ceres::Problem problem;
+  double weight_t = 0.1;
+
+  // Add blocks
+  int spatial_blocks = 0;
+  int temporal_blocks = 0;
+  for (int h = 0; h < kCamHeight; h++) {
+    for (int w = 0; w < kCamWidth; ++w) {
+      if (cam_set_[frm_idx].mask.at<uchar>(h, w) != my::VERIFIED_TRUE)
+        continue;
+
+      // Add spatial data term
+      std::vector<double*> spatial_parameters;
+      SpatialConstraint::SpatialCostFunction* s_cost_function
+          = SpatialConstraint::Create(h, w, cam_slots_[frm_idx].slots_,
+                                      &cam_set_[frm_idx].mask,
+                                      &cam_set_[frm_idx].img_class,
+                                      cam_set_[frm_idx].pointer.data(),
+                                      &spatial_parameters);
+      if (s_cost_function != nullptr) {
+        problem.AddResidualBlock(s_cost_function, nullptr, spatial_parameters);
+        spatial_blocks++;
+      }
+
+      // Add temporal data term
+      if (cam_set_[frm_idx - 1].mask.at<uchar>(h, w) == my::VERIFIED_TRUE) {
+        std::vector<double*> temporal_parameters;
+        int c = cam_set_[frm_idx].img_class.at<uchar>(h, w);
+        TemporalConstraint::TemporalCostFunction* t_cost_function
+            = TemporalConstraint::Create(h, w, weight_t, 1, cam_set_, frm_idx,
+                                         cam_slots_[frm_idx].slots_,
+                                         cam_set_[frm_idx].pointer.data(),
+                                         &temporal_parameters);
+        if (t_cost_function != nullptr) {
+          problem.AddResidualBlock(t_cost_function, nullptr, temporal_parameters);
+          temporal_blocks++;
+        }
+      }
+    }
+  }
+
+  // Solve
+  ceres::Solver::Options options;
+  options.gradient_tolerance = 1e-10;
+  options.function_tolerance = 1e-10;
+  options.min_relative_decrease = 1e1;
+  options.linear_solver_type = ceres::SPARSE_NORMAL_CHOLESKY;
+  options.max_num_iterations = 100;
+  options.minimizer_progress_to_stdout = true;
+  ceres::Solver::Summary summary;
+
+  LOG(INFO) << "Stat: OptimizeDepthMat(" << frm_idx << "), Begin opt.";
+  ceres::Solve(options, &problem, &summary);
+
+  LOG(INFO) << summary.BriefReport();
+  std::cout << summary.BriefReport() << std::endl;
+  LOG(INFO) << "End: OptimizeDepthMat(" << frm_idx << ")";
+
+//  ShowMat(&cam_set_[frm_idx].depth, "depth_res", 0, 20.0, 35.0);
+}
+
+// Generate I_est by pattern
+void Reconstructor::GenerateIestFromDepth(int frm_idx) {
+  LOG(INFO) << "Start: GenerateIestFromDepth(" << frm_idx << ")";
+  cam_set_[frm_idx].img_est.create(kCamHeight, kCamWidth, CV_8UC1);
+  cam_set_[frm_idx].img_est.setTo(0);
+
+  for (int h = 0; h < kCamHeight; h++) {
+    for (int w = 0; w < kCamWidth; w++) {
+      if (cam_set_[frm_idx].mask.at<uchar>(h, w) != my::VERIFIED_TRUE) {
+        continue;
+      }
+      // Get depth
+      double depth = cam_set_[frm_idx].depth.at<double>(h, w);
+      if (depth <= 0)
+        continue;
+      double x_pro = GetXproFromDepth(depth, h, w, &calib_set_);
+      double y_pro = GetYproFromXpro(x_pro, h, w, epi_A_mat_, epi_B_mat_);
+      // Get img_intensity
+      double img_k_head;
+      pat_grid_->Evaluate(y_pro, x_pro, &img_k_head);
+      double norm_weight = cam_set_[frm_idx].shade_mat.at<double>(h, w);
+      cam_set_[frm_idx].img_est.at<uchar>(h, w) = uchar(img_k_head * norm_weight);
+    }
+  }
+//  ShowMat<uchar>(&cam_set_[frm_idx].img_est, "img_est", 0, 0, 255);
+  LOG(INFO) << "End: GenerateIestFromDepth(" << frm_idx << ")";
+}
+
+// Optimize Shading part by current frame & I_est
+void Reconstructor::OptimizeShadingMat(int frm_idx) {
+  LOG(INFO) << "Start: OptimizeShadingMat(" << frm_idx << ")";
+  double weight_t = 1.0;
+  ceres::Problem shade_problem;
+
+  // Add blocks
+  int data_blocks = 0;
+  double* data_set = vertex_set_[frm_idx].vertex_val_.data();
+  for (int h = 0; h < kCamHeight; ++h) {
+    for (int w = 0; w < kCamWidth; ++w) {
+      if (cam_set_[frm_idx].mask.at<uchar>(h, w) != my::VERIFIED_TRUE)
+        continue;
+      // Add Data Term
+      Eigen::Matrix<double, Eigen::Dynamic, 2> vertex_nbr
+          = vertex_set_[frm_idx].FindkNearestVertex(w, h, kNearestPoints + 1);
+      double img_obs_k = (double)cam_set_[frm_idx].img_obs.at<uchar>(h, w);
+      double img_est_k = (double)cam_set_[frm_idx].img_est.at<uchar>(h, w);
+      double shade_k = (double)cam_set_[frm_idx].shade_mat.at<double>(h, w);
+      double img_pattern_k = img_est_k / shade_k;
+      std::vector<double*> parameter_blocks;
+
+      ShadeDataConstraint::ShadeDataCostFunction* cost_function
+          = ShadeDataConstraint::Create(
+              img_obs_k, img_pattern_k, kNearestPoints, vertex_nbr, data_set,
+              &parameter_blocks);
+      if (cost_function != nullptr) {
+        shade_problem.AddResidualBlock(cost_function, nullptr, parameter_blocks);
+        data_blocks++;
+      } else {
+        LOG(ERROR) << "Invalid cost function. (" << h << "," << w << ")";
+      }
+    }
+  }
+
+  // optimize
+  ceres::Solver::Options shade_options;
+  shade_options.gradient_tolerance = 1e-10;
+  shade_options.function_tolerance = 1e-10;
+  shade_options.min_relative_decrease = 1e-5;
+  shade_options.linear_solver_type = ceres::SPARSE_NORMAL_CHOLESKY;
+  shade_options.max_num_iterations = 100;
+  shade_options.minimizer_progress_to_stdout = true;
+  ceres::Solver::Summary shade_summary;
+  LOG(INFO) << "Stat: OptimizeShadingMat(" << frm_idx << "), Begin opt.";
+  ceres::Solve(shade_options, &shade_problem, &shade_summary);
+
+  LOG(INFO) << shade_summary.BriefReport();
+  std::cout << shade_summary.BriefReport() << std::endl;
+  LOG(INFO) << "End: OptimizeShadingMat(" << frm_idx << ")";
+}
+
+// Output all the result for further analysis
+void Reconstructor::OutputResult(int frm_idx) {
+  LOG(INFO) << "Start: OutputResult(" << frm_idx << ")";
+  bool status = true;
+  // Depth mat
+  std::string depth_txt_name
+      = output_file_path_ + depth_file_path_ + depth_file_name_
+        + Num2Str(frm_idx) + ".txt";
+  status = SaveMatToTxt(depth_txt_name, cam_set_[frm_idx].depth);
+  if (status) LOG(INFO) << depth_txt_name << " success.";
+  // Shade mat
+  std::string shade_txt_name
+      = output_file_path_ + "shade" + Num2Str(frm_idx) + ".txt";
+  status = SaveMatToTxt(shade_txt_name, cam_set_[frm_idx].shade_mat);
+  if (status) LOG(INFO) << shade_txt_name << " success.";
+  // Shade mat show
+  std::string shade_png_name
+      = output_file_path_ + "shade" + Num2Str(frm_idx) + ".png";
+  status = cv::imwrite(shade_png_name, cam_set_[frm_idx].shade_mat * 255.0);
+  if (status) LOG(INFO) << shade_png_name << " success.";
+  // img_obs
+  std::string obs_img_name
+      = output_file_path_ + "I_obs" + Num2Str(frm_idx) + ".png";
+  status = cv::imwrite(obs_img_name, cam_set_[frm_idx].img_obs);
+  if (status) LOG(INFO) << obs_img_name << " success.";
+  // img_est
+  std::string est_img_name
+      = output_file_path_ + "I_est" + Num2Str(frm_idx) + ".png";
+  status = cv::imwrite(est_img_name, cam_set_[frm_idx].img_est);
+  if (status) LOG(INFO) << est_img_name << " success.";
+  // pattern_class
+  std::string class_img_name
+      = output_file_path_ + "I_class" + Num2Str(frm_idx) + ".png";
+  status = cv::imwrite(class_img_name, cam_set_[frm_idx].img_class);
+  if (status) LOG(INFO) << class_img_name << " success.";
+  // mask
+  std::string mask_img_name
+      = output_file_path_ + "mask" + Num2Str(frm_idx) + ".png";
+  status = cv::imwrite(mask_img_name, cam_set_[frm_idx].mask);
+  if (status) LOG(INFO) << class_img_name << " success.";
+
+  // vertex_set
+  std::string vertex_txt_name
+      = output_file_path_ + "vertex_val" + Num2Str(frm_idx) + ".txt";
+  status = SaveValToTxt(vertex_txt_name, vertex_set_[frm_idx].vertex_val_,
+                        vertex_set_[frm_idx].block_height_,
+                        vertex_set_[frm_idx].block_width_);
+  if (status) LOG(INFO) << vertex_txt_name << " success.";
+  // vertex_valid
+  std::string valid_txt_name
+      = output_file_path_ + "valid" + Num2Str(frm_idx) + ".txt";
+  status = SaveVecUcharToTxt(valid_txt_name, vertex_set_[frm_idx].valid_,
+                             vertex_set_[frm_idx].block_height_,
+                             vertex_set_[frm_idx].block_width_);
+  if (status) LOG(INFO) << valid_txt_name << " success.";
+  LOG(INFO) << "End: OutputResult(" << frm_idx << ")";
+}
+
+bool Reconstructor::Close() {
+  return true;
+}
+
+/*
+void Reconstructor::UpdateVertexFrame(int frm_idx) {
+
+  if (frm_idx == 1) {
+    for (int i = 0; i < vertex_set_[frm_idx].len_; i++) {
+      vertex_set_[frm_idx].frm_(i) = frm_idx;
+    }
+  }
+  // For every vertex in mask set
+  int s_rad = 7;
+  double diff_thred = 10;
+  double num_thred = 0.1;
+  for (int i = 0; i < vertex_set_[frm_idx].len_; i++) {
+    int x = vertex_set_[frm_idx].pos_(i, 0);
+    int y = vertex_set_[frm_idx].pos_(i, 1);
+    if (cam_set_[frm_idx].mask.at<uchar>(y, x) != my::VERIFIED_TRUE)
+      continue;
+    // Found history info
+    int frm_old = vertex_set_[frm_idx - 1].frm_(i);
+    if (cam_set_[frm_old].mask.at<uchar>(y, x) != my::VERIFIED_TRUE)
+      continue;
+    int valid_pix_sum = 0;
+    int diff_pix_num = 0;
+    for (int dh = -s_rad; dh <= s_rad; dh++) {
+      for (int dw = -s_rad; dw <= s_rad; dw++) {
+        int h = y + dh;
+        int w = x + dw;
+        if (h < 0 || h >= kCamHeight || w < 0 || w > kCamWidth)
+          continue;
+        if (cam_set_[frm_idx].mask.at<uchar>(h, w) != my::VERIFIED_TRUE
+            || cam_set_[frm_old].mask.at<uchar>(h, w) != my::VERIFIED_TRUE)
+          continue;
+        valid_pix_sum++;
+        double I_obs_old = cam_set_[frm_old].img_obs.at<uchar>(h, w);
+        double I_obs_now = cam_set_[frm_idx].img_obs.at<uchar>(h, w);
+        if (std::abs(I_obs_old - I_obs_now) > diff_thred) {
+          diff_pix_num++;
+        }
+      }
+    }
+    // Count diff num
+    if ((double)diff_pix_num / (double)valid_pix_sum > num_thred) {
+      vertex_set_[frm_idx].frm_(i) = frm_idx;
+    } else {
+      vertex_set_[frm_idx].frm_(i) = frm_old;
+    }
+  }
+  // Save
+  std::string file_name = output_file_path_ + vertex_file_path_
+                          + "vertex_frm" + Num2Str(frm_idx) + ".txt";
+  SaveFrmToTxt(
+      file_name, vertex_set_[frm_idx].frm_,
+      vertex_set_[frm_idx].block_height_, vertex_set_[frm_idx].block_width_);
+}
+
+void Reconstructor::NormalizeIobs(int frm_idx) {
   // Normalize obs image
   uchar max_val = 0;
   uchar min_val = 255;
-  for (int h = 0; h < kCamHeight; h++) {
-    for (int w = 0; w < kCamWidth; w++) {
-      if (cam_set_[frm_idx].mask.at<uchar>(h, w) == my::VERIFIED_TRUE) {
-        if (cam_set_[frm_idx].img_obs.at<uchar>(h, w) > max_val)
-          max_val = cam_set_[frm_idx].img_obs.at<uchar>(h, w);
-        if (cam_set_[frm_idx].img_obs.at<uchar>(h, w) < min_val)
-          min_val = cam_set_[frm_idx].img_obs.at<uchar>(h, w);
-      } else {
-        cam_set_[frm_idx].img_obs.at<uchar>(h, w) = 0;
-      }
-    }
-  }
-  for (int h = 0; h < kCamHeight; h++) {
-    for (int w = 0; w < kCamWidth; w++) {
-      if (cam_set_[frm_idx].mask.at<uchar>(h, w) == my::VERIFIED_TRUE) {
-        double ori_val = cam_set_[frm_idx].img_obs.at<uchar>(h, w);
-        double new_val = (ori_val - min_val) / (double)(max_val - min_val);
-        cam_set_[frm_idx].img_obs.at<uchar>(h, w) = (uchar)(new_val * 255);
-      }
-    }
-  }
+//  cam_set_[frm_idx].img_obs.create(kCamHeight, kCamWidth, CV_8UC1);
+//  for (int h = 0; h < kCamHeight; h++) {
+//    for (int w = 0; w < kCamWidth; w++) {
+//      if (cam_set_[frm_idx].mask.at<uchar>(h, w) == my::VERIFIED_TRUE) {
+//        if (cam_set_[frm_idx].img_obs_raw.at<uchar>(h, w) > max_val)
+//          max_val = cam_set_[frm_idx].img_obs_raw.at<uchar>(h, w);
+//        if (cam_set_[frm_idx].img_obs_raw.at<uchar>(h, w) < min_val)
+//          min_val = cam_set_[frm_idx].img_obs_raw.at<uchar>(h, w);
+//      } else {
+//        cam_set_[frm_idx].img_obs.at<uchar>(h, w) = 0;
+//      }
+//    }
+//  }
+//  for (int h = 0; h < kCamHeight; h++) {
+//    for (int w = 0; w < kCamWidth; w++) {
+//      if (cam_set_[frm_idx].mask.at<uchar>(h, w) == my::VERIFIED_TRUE) {
+//        double ori_val = cam_set_[frm_idx].img_obs_raw.at<uchar>(h, w);
+//        double new_val = (ori_val - min_val) / (double)(max_val - min_val);
+//        cam_set_[frm_idx].img_obs.at<uchar>(h, w) = (uchar)(new_val * 255);
+//      }
+//    }
+//  }
+  cam_set_[frm_idx].img_obs_raw.copyTo(cam_set_[frm_idx].img_obs);
   cv::namedWindow("I_obs" + Num2Str(frm_idx));
   cv::imshow("I_obs" + Num2Str(frm_idx), cam_set_[frm_idx].img_obs);
   cv::imwrite(output_file_path_ + "I_obs" + Num2Str(frm_idx) + ".png", cam_set_[frm_idx].img_obs);
   cv::waitKey(2000);
   cv::destroyWindow("I_obs" + Num2Str(frm_idx));
-//  cv::namedWindow("mask" + Num2Str(frm_idx));
-//  cv::imshow("mask" + Num2Str(frm_idx), cam_set_[frm_idx].mask * 255);
-//  cv::waitKey(00);
-//  cv::destroyWindow("mask" + Num2Str(frm_idx));
 }
 
 void Reconstructor::SetVertexFromBefore(int frm_idx) {
@@ -716,12 +1304,15 @@ bool Reconstructor::OptimizeVertexSet(int frm_idx) {
   double alpha_val = 1.0;
   double alpha_norm = 1.0;
 
+  double* data_set = vertex_set_[frm_idx].vertex_val_.data();
+  int* frm_num_set = vertex_set_[frm_idx].frm_.data();
+
   // Add blocks
   double fx = calib_set_.cam_mat(0, 0);
   double fy = calib_set_.cam_mat(1, 1);
   double dx = calib_set_.cam_mat(0, 2);
   double dy = calib_set_.cam_mat(1, 2);
-  int block_num = 0;
+  int data_block_num = 0;
   for (int h = 0; h < kCamHeight; h++) {
     for (int w = 0; w < kCamWidth; w++) {
       if ((cam_set_[frm_idx].mask.at<uchar>(h, w) != my::VERIFIED_TRUE)){
@@ -730,7 +1321,6 @@ bool Reconstructor::OptimizeVertexSet(int frm_idx) {
       // Add Data Term
       Eigen::Matrix<double, Eigen::Dynamic, 2> vertex_nbr
           = vertex_set_[frm_idx].FindkNearestVertex(w, h, kNearestPoints + 1);
-      double* data_set = vertex_set_[frm_idx].vertex_val_.data();
       std::vector<double*> parameter_blocks;
       int idx_k = h*kCamWidth + w;
       double img_obs = (double)(cam_set_[frm_idx].img_obs.at<uchar>(h, w));
@@ -740,15 +1330,18 @@ bool Reconstructor::OptimizeVertexSet(int frm_idx) {
       double epi_B = epi_B_mat_.at<double>(h, w);
       DeformConstraint::DeformCostFunction* cost_function =
           DeformConstraint::Create(
-              *pat_grid_, img_obs, kNearestPoints, vec_M, vec_D,
-              epi_A, epi_B, fx, fy, dx, dy,
-              calib_set_.light_vec_, vertex_nbr, data_set, &parameter_blocks);
-      problem.AddResidualBlock(cost_function, nullptr, parameter_blocks);
-      block_num++;
+              *pat_grid_, img_obs, vec_M, vec_D, epi_A, epi_B, fx, fy, dx, dy,
+              calib_set_.light_vec_, kNearestPoints, frm_idx, vertex_nbr,
+              data_set, frm_num_set, &parameter_blocks);
+      if (cost_function != nullptr) {
+        problem.AddResidualBlock(cost_function, nullptr, parameter_blocks);
+        data_block_num++;
+      }
     }
   }
 
   // Add residual block: Regular Term
+  int reg_block_num = 0;
   for (int ver_idx = 0; ver_idx < vertex_set_[frm_idx].len_; ver_idx++) {
     int w = vertex_set_[frm_idx].pos_(ver_idx, 0);
     int h = vertex_set_[frm_idx].pos_(ver_idx, 1);
@@ -756,14 +1349,15 @@ bool Reconstructor::OptimizeVertexSet(int frm_idx) {
       continue;
     Eigen::Matrix<double, Eigen::Dynamic, 2> vertex_nbr
         = vertex_set_[frm_idx].FindkNearestVertex(w, h, kRegularNbr + 2);
-    double* data_set = vertex_set_[frm_idx].vertex_val_.data();
     std::vector<double*> parameter_blocks;
     RegularConstraint::RegularCostFunction* cost_function =
         RegularConstraint::Create(
-            alpha_val, alpha_norm, kRegularNbr, vertex_nbr, data_set,
-            &parameter_blocks);
-    problem.AddResidualBlock(cost_function, nullptr, parameter_blocks);
-    block_num++;
+            alpha_val, alpha_norm, kRegularNbr, frm_idx,
+            vertex_nbr, data_set, frm_num_set, &parameter_blocks);
+    if (cost_function != nullptr) {
+      problem.AddResidualBlock(cost_function, nullptr, parameter_blocks);
+      reg_block_num++;
+    }
   }
 
   ceres::Solver::Options options;
@@ -771,8 +1365,8 @@ bool Reconstructor::OptimizeVertexSet(int frm_idx) {
   options.function_tolerance = 1e-10;
   options.min_relative_decrease = 1e-1;
   options.linear_solver_type = ceres::SPARSE_NORMAL_CHOLESKY;
-  options.max_num_iterations = 50;
-  options.minimizer_progress_to_stdout = false;
+  options.max_num_iterations = 100;
+  options.minimizer_progress_to_stdout = true;
   ceres::Solver::Summary summary;
 
 //  if (frm_idx == 3) {
@@ -782,6 +1376,9 @@ bool Reconstructor::OptimizeVertexSet(int frm_idx) {
 //    std::cout << (int)vertex_set_[frm_idx].valid_(idx) << std::endl;
 //  }
 
+  if (data_block_num == 0 && reg_block_num == 0) {
+    return status;
+  }
   ceres::Solve(options, &problem, &summary);
 
   // Optimization part may change the norm value. Need to be re-normalized.
@@ -800,6 +1397,8 @@ bool Reconstructor::OptimizeVertexSet(int frm_idx) {
 
   // Save?
 //  std::cout << summary.FullReport() << std::endl;
+  std::cout << "Data_Block: " << data_block_num << std::endl;
+  std::cout << "Reg_Block: " << reg_block_num << std::endl;
   std::cout << summary.BriefReport() << std::endl;
   return status;
 }
@@ -888,10 +1487,11 @@ bool Reconstructor::GenerateIest(int frm_idx) {
 
   cam_set_[frm_idx].img_est.create(kCamHeight, kCamWidth, CV_8UC1);
   cam_set_[frm_idx].img_est.setTo(0);
+  cam_set_[frm_idx].shade_mat.create(kCamHeight, kCamWidth, CV_64FC1);
+  cam_set_[frm_idx].shade_mat.setTo(0);
   cv::Mat norm_mat;
   norm_mat.create(kCamHeight, kCamWidth, CV_8UC1);
   norm_mat.setTo(0);
-  Eigen::Vector3d D = calib_set_.D;
   for (int h = 0; h < kCamHeight; h++) {
     for (int w = 0; w < kCamWidth; w++) {
       if (cam_set_[frm_idx].mask.at<uchar>(h, w) != my::VERIFIED_TRUE)
@@ -900,12 +1500,8 @@ bool Reconstructor::GenerateIest(int frm_idx) {
       double depth = cam_set_[frm_idx].depth.at<double>(h, w);
       if (depth <= 0)
         continue;
-      int idx_k = h*kCamWidth + w;
-      Eigen::Vector3d M = calib_set_.M.block<3, 1>(0, idx_k);
-      double epi_A = epi_A_mat_.at<double>(h, w);
-      double epi_B = epi_B_mat_.at<double>(h, w);
-      double x_pro = (M(0)*depth + D(0)) / (M(2)*depth + D(2));
-      double y_pro = (-epi_A/epi_B)*x_pro + 1 / epi_B;
+      double x_pro = GetXproFromDepth(depth, h, w, calib_set_);
+      double y_pro = GetYproFromXpro(x_pro, h, w, epi_A_mat_, epi_B_mat_);
       // Get img_intensity
       double img_k_head;
       pat_grid_->Evaluate(y_pro, x_pro, &img_k_head);
@@ -920,6 +1516,7 @@ bool Reconstructor::GenerateIest(int frm_idx) {
         cam_set_[frm_idx].img_est.at<uchar>(h, w) = kMaskIntensityThred;
         continue;
       }
+      cam_set_[frm_idx].shade_mat.at<double>(h, w) = norm_weight;
       cam_set_[frm_idx].img_est.at<uchar>(h, w) = uchar(img_k_head * norm_weight);
       norm_mat.at<uchar>(h, w) = uchar(255 * norm_weight);
     }
@@ -999,6 +1596,4 @@ bool Reconstructor::WriteResult(int frm_idx) {
   return status;
 }
 
-bool Reconstructor::Close() {
-  return true;
-}
+ */

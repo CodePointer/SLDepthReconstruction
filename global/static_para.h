@@ -7,6 +7,7 @@
 
 #include <opencv2/opencv.hpp>
 #include <Eigen/Core>
+#include <glog/logging.h>
 
 const int kCamHeight = 1024;
 const int kCamWidth = 1280;
@@ -14,12 +15,14 @@ const int kCamVecSize = kCamHeight * kCamWidth;
 const int kProHeight = 800;
 const int kProWidth = 1280;
 
+const int kIntensityClassNum = 2;
 const double kDepthMin = 20.0;
 const double kDepthMax = 60.0;
 const int kGridSize = 15;
 const int kFrameNum = 90;
 const uchar kMaskIntensityThred = 10;
 const int kMaskMinAreaThred = 40;
+const double kDepthRad = 2;
 const int kNearestPoints = 8; // Used for neighbor interpolation
 const int kRegularNbr = 8;
 
@@ -46,10 +49,13 @@ namespace my {
 
 struct CamMatSet {
   cv::Mat img_obs;
+  cv::Mat img_class;
+  cv::Mat shade_mat;
   cv::Mat img_est;
   cv::Mat x_pro;
   cv::Mat y_pro;
   cv::Mat depth;
+  ImgMatrix pointer;
   cv::Mat mask;
   cv::Mat P; // Probability
   Eigen::Matrix<double, 3, Eigen::Dynamic> norm_vec;

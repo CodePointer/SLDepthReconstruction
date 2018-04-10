@@ -21,6 +21,7 @@ public:
   // Value: Include vertex_val and norm direction
   Eigen::Matrix<double, Eigen::Dynamic, 4, Eigen::RowMajor> vertex_val_;
   Eigen::Matrix<int, Eigen::Dynamic, 2> pos_;
+  Eigen::Matrix<int, Eigen::Dynamic, 1> frm_;
   Eigen::Matrix<uchar, Eigen::Dynamic, 1> valid_;
 
 
@@ -32,7 +33,6 @@ public:
   int GetVertexIdxByPos(int x, int y);
   uchar GetValidStatusByPos(int x, int y);
   int GetNeighborVertexIdxByIdx(int idx_i, const uchar dir);
-
 };
 
 

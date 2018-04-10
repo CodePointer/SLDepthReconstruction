@@ -12,6 +12,39 @@ std::string Num2Str(int number) {
   return idx2str;
 }
 
+std::string Val2Str(double val) {
+  std::stringstream ss;
+  ss << val;
+  std::string idx2str;
+  ss >> idx2str;
+  return idx2str;
+}
+
+double GetDepthFromXpro(double x_pro, int h_cam, int w_cam, CalibSet* p_calib) {
+  int idx = h_cam * kCamWidth + w_cam;
+  Eigen::Vector3d vec_M = p_calib->M.block<3, 1>(0, idx);
+  Eigen::Vector3d vec_D = p_calib->D;
+  double depth = - (vec_D(0) - vec_D(2) * x_pro)
+                 / (vec_M(0) - vec_M(2) * x_pro);
+  return depth;
+}
+
+double GetXproFromDepth(double depth, int h_cam, int w_cam, CalibSet* p_calib) {
+  int idx = h_cam * kCamWidth + w_cam;
+  Eigen::Vector3d vec_M = p_calib->M.block<3, 1>(0, idx);
+  Eigen::Vector3d vec_D = p_calib->D;
+  double x_pro = (vec_M(0)*depth + vec_D(0))
+                 / (vec_M(2)*depth + vec_D(2));
+  return x_pro;
+}
+
+double GetYproFromXpro(double x_pro, int h_cam, int w_cam, cv::Mat epi_A, cv::Mat epi_B) {
+  double A = epi_A.at<double>(h_cam, w_cam);
+  double B = epi_B.at<double>(h_cam, w_cam);
+  double y_pro = (-A/B)*x_pro + 1/B;
+  return y_pro;
+}
+
 void ErrorThrow(std::string error_info) {
   std::cout << "<Error>" << error_info << std::endl;
   fgetc(stdin);
@@ -83,6 +116,23 @@ bool SaveValToTxt(std::string file_name,
       file << "\n";
     }
 //    file << "\n";
+  }
+  return true;
+}
+
+bool SaveFrmToTxt(std::string file_name,
+                  Eigen::Matrix<int, Eigen::Dynamic, 1> vec,
+                  int kHeight, int kWidth) {
+  std::fstream file(file_name, std::ios::out);
+  if (!file) {
+    ErrorThrow("SaveFrmToTxt, file_name=" + file_name);
+    return false;
+  }
+  for (int h = 0; h < kHeight; h++) {
+    for (int w = 0; w < kWidth; w++) {
+      file << vec(h * kWidth + w, 0);
+      file << "\n";
+    }
   }
   return true;
 }

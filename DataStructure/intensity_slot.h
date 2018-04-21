@@ -28,6 +28,7 @@ class IntensitySlot {
 private:
   std::vector<DepthSegment> seg_sets_;
   std::vector<double> p_bias_;
+  std::string info_;
 
 public:
   IntensitySlot();
@@ -38,6 +39,9 @@ public:
   double GetPointerFromDepth(double depth);
   template <class T>
   T GetDepthFromPointer(T p) {
+    if (seg_sets_.size() <= 0) {
+      LOG(ERROR) << "Empty seg sets." << std::endl;
+    }
     if (p < T(0)) {
       return T(seg_sets_[0].start);
     }
@@ -71,6 +75,21 @@ public:
     }
     result += "]";
     return result;
+  }
+  bool WriteToFile(std::string file_name) {
+    std::string seg_file_name = file_name + "_s.txt";
+    std::fstream file(seg_file_name, std::ios::out);
+    for (int i = 0; i < seg_sets_.size(); i++) {
+      file << seg_sets_[i].start << " " << seg_sets_[i].end << std::endl;
+    }
+    file.close();
+
+    std::string p_file_name = file_name + "_p.txt";
+    std::fstream pfile(p_file_name, std::ios::out);
+    for (int i = 0; i < p_bias_.size(); i++) {
+      pfile << p_bias_[i] << std::endl;
+    }
+    pfile.close();
   }
 };
 

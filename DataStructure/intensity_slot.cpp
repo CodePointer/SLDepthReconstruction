@@ -30,7 +30,7 @@ bool IntensitySlot::InsertSegment(DepthSegment seg) {
 double IntensitySlot::GetNearestPointerFromDepth(double depth) {
   double pointer = -1.0;
   if (seg_sets_.empty()) {
-    LOG(ERROR) << "Empty intensity slot.";
+//    LOG(ERROR) << "Empty intensity slot.";
     return -1.0;
   }
   for (int i = 0; i < seg_sets_.size(); i++) {
@@ -40,11 +40,13 @@ double IntensitySlot::GetNearestPointerFromDepth(double depth) {
     } else if (depth < seg_sets_[i].start) {
       if (i == 0) {
         pointer = GetPointerFromDepth(seg_sets_[i].start);
+        break;
       } else {
         pointer = (std::abs(depth - seg_sets_[i-1].end)
                    < std::abs(depth - seg_sets_[i].start))
                   ? GetPointerFromDepth(seg_sets_[i-1].end)
                   : GetPointerFromDepth(seg_sets_[i].start);
+        break;
       }
     }
   }

@@ -45,6 +45,22 @@ double GetYproFromXpro(double x_pro, int h_cam, int w_cam, cv::Mat epi_A, cv::Ma
   return y_pro;
 }
 
+// Used for weight calculation
+void CalculateNbrWeight(Eigen::Matrix<double, Eigen::Dynamic, 2> nbr_set,
+                        Eigen::Matrix<double, Eigen::Dynamic, 1> * weight,
+                        int k, int start_idx) {
+  if (weight == nullptr) {
+    return;
+  }
+  double sum_val = 0;
+  for (int i = start_idx; i < start_idx + k; i++) {
+    (*weight)(i) = pow((1 - nbr_set(i, 1) / nbr_set(start_idx + k, 1)), 2);
+    sum_val += (*weight)(i);
+  }
+  (*weight) = (*weight) / sum_val;
+}
+
+
 void ErrorThrow(std::string error_info) {
   std::cout << "<Error>" << error_info << std::endl;
   fgetc(stdin);
@@ -96,6 +112,23 @@ bool SaveMatToTxt(std::string file_name, cv::Mat mat) {
     }
     file << "\n";
   }
+  file.close();
+  return true;
+}
+
+bool SaveImgMatToTxt(std::string file_name, ImgMatrix mat) {
+  std::fstream file(file_name, std::ios::out);
+  if (!file) {
+    LOG(ERROR) << "file_name=" << file_name;
+    return false;
+  }
+  for (int h = 0; h < kCamHeight; h++) {
+    for (int w = 0; w < kCamWidth; w++) {
+      file << mat(h, w) << " ";
+    }
+    file << "\n";
+  }
+  file.close();
   return true;
 }
 
@@ -117,6 +150,7 @@ bool SaveValToTxt(std::string file_name,
     }
 //    file << "\n";
   }
+  file.close();
   return true;
 }
 
@@ -134,6 +168,7 @@ bool SaveFrmToTxt(std::string file_name,
       file << "\n";
     }
   }
+  file.close();
   return true;
 }
 
@@ -151,6 +186,7 @@ bool SaveVecUcharToTxt(std::string file_name,
     }
     file << "\n";
   }
+  file.close();
   return true;
 }
 

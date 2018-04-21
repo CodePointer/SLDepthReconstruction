@@ -67,8 +67,8 @@ Eigen::Vector4i VertexSet::Find4ConnectVertex(int x, int y) {
 int VertexSet::GetVertexIdxByPos(int x, int y) {
   if ((x >= 0) && (x < kCamWidth) && (y >= 0) && (y < kCamHeight)
       && (x % block_size_ == 0) && (y % block_size_ == 0)) {
-    int h = y / 15;
-    int w = x / 15;
+    int h = y / block_size_;
+    int w = x / block_size_;
     return h * block_width_ + w;
   }
   return -1;

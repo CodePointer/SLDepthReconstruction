@@ -22,6 +22,11 @@ double GetXproFromDepth(double depth, int h_cam, int w_cam, CalibSet* p_calib);
 
 double GetYproFromXpro(double x_pro, int x_cam, int y_cam, cv::Mat epi_A, cv::Mat epi_B);
 
+// Used for weight calculation
+void CalculateNbrWeight(Eigen::Matrix<double, Eigen::Dynamic, 2> nbr_set,
+                        Eigen::Matrix<double, Eigen::Dynamic, 1> * weight,
+                        int k, int start_idx = 0);
+
 void ErrorThrow(std::string error_info);
 
 cv::Mat LoadTxtToMat(std::string file_name, int kHeight, int kWidth);
@@ -31,6 +36,8 @@ void LoadTxtToEigen(std::string file_name,
                     int kHeight, int kWidth, double * data);
 
 bool SaveMatToTxt(std::string file_name, cv::Mat mat);
+
+bool SaveImgMatToTxt(std::string file_name, ImgMatrix mat);
 
 bool SaveValToTxt(std::string file_name,
                   Eigen::Matrix<double, Eigen::Dynamic, 4, Eigen::RowMajor> vec,

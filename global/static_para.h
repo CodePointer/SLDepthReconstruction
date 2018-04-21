@@ -16,15 +16,23 @@ const int kProHeight = 800;
 const int kProWidth = 1280;
 
 const int kIntensityClassNum = 2;
-const double kDepthMin = 20.0;
-const double kDepthMax = 60.0;
-const int kGridSize = 15;
+const int kTemporalWindowSize = 5;
+const int kNodeBlockSize = 8;
+const double kDepthMin = 15.0;
+const double kDepthMax = 47.0;
+const int kGridSize = 45;
 const int kFrameNum = 90;
 const uchar kMaskIntensityThred = 10;
 const int kMaskMinAreaThred = 40;
 const double kDepthRad = 2;
 const int kNearestPoints = 8; // Used for neighbor interpolation
 const int kRegularNbr = 8;
+
+// For k_means
+const int kKMBlockHeightNum = 16;
+const int kKMBlockWidthNum = 16;
+const int kKMBlockHeight = 64;
+const int kKMBlockWidth = 80;
 
 typedef Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> ImgMatrix;
 
@@ -58,6 +66,7 @@ struct CamMatSet {
   ImgMatrix pointer;
   cv::Mat mask;
   cv::Mat P; // Probability
+  Eigen::Matrix<double, kIntensityClassNum, Eigen::Dynamic> km_center;
   Eigen::Matrix<double, 3, Eigen::Dynamic> norm_vec;
 };
 

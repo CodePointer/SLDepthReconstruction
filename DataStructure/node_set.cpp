@@ -23,6 +23,12 @@ NodeSet::NodeSet() {
 
 NodeSet::~NodeSet() = default;
 
+void NodeSet::Clear() {
+  val_.resize(0, 1);
+  pos_.resize(0, 2);
+  valid_.resize(0, 1);
+}
+
 bool NodeSet::IsNode(int x, int y) {
   int h, w;
   GetNodeCoordByPos(x, y, &h, &w);
@@ -131,16 +137,17 @@ Eigen::Matrix<double, Eigen::Dynamic, 2> NodeSet::FindkNearestNodes(
   return nbr_set;
 };
 
-void NodeSet::WriteToFile(std::string file_name) {
+bool NodeSet::WriteToFile(std::string file_name) {
   std::fstream file(file_name, std::ios::out);
   if (!file) {
     LOG(ERROR) << "WriteToFile error, file_name=" + file_name;
-    return;
+    return false;
   }
   for (int i = 0; i < len_; i++) {
-    file << valid_(i, 0) << " ";
-    file << val_(i, 0) << " ";
+    file << (int)valid_(i, 0) << " ";
+    file << (double)val_(i, 0) << " ";
     file << pos_(i, 0) << " " << pos_(i, 1) << std::endl;
   }
   file.close();
+  return true;
 }

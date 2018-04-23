@@ -78,10 +78,6 @@ private:
   std::string output_file_path_;
   std::string depth_file_path_;
   std::string depth_file_name_;
-  std::string vertex_file_path_;
-  std::string vertex_file_name_;
-  std::string valid_file_path_;
-  std::string valid_file_name_;
 
   ////////////////////////////////////////////////////////////////
   /// Optimization part. Related parameters.
@@ -111,6 +107,8 @@ private:
   void GenerateIestFromDepth(int frm_idx);
   void OptimizeShadingMat(int frm_idx);
   void OutputResult(int frm_idx);
+
+  void ReleaseSpace(int frm_idx);
 
 public:
   Reconstructor();

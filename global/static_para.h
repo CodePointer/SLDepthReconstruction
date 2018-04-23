@@ -58,6 +58,7 @@ namespace my {
 struct CamMatSet {
   cv::Mat img_obs;
   cv::Mat img_class;
+  cv::Mat img_class_p;
   cv::Mat shade_mat;
   cv::Mat img_est;
   cv::Mat x_pro;
@@ -65,7 +66,6 @@ struct CamMatSet {
   cv::Mat depth;
   ImgMatrix pointer;
   cv::Mat mask;
-  cv::Mat P; // Probability
   Eigen::Matrix<double, kIntensityClassNum, Eigen::Dynamic> km_center;
   Eigen::Matrix<double, 3, Eigen::Dynamic> norm_vec;
 };

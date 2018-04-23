@@ -22,12 +22,13 @@ public:
 
   NodeSet();
   ~NodeSet();
+  void Clear();
   bool IsNode(int x, int y);
   void GetNodeCoordByPos(int x, int y, int * h, int * w);
   void GetNodeCoordByIdx(int idx, int * h, int * w);
   bool SetNodePos(int idx, int x, int y);
   Eigen::Matrix<double, Eigen::Dynamic, 2> FindkNearestNodes(int x, int y, int k);
-  void WriteToFile(std::string file_name);
+  bool WriteToFile(std::string file_name);
 };
 
 

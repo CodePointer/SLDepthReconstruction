@@ -30,6 +30,13 @@ VertexSet::VertexSet() {
 
 VertexSet::~VertexSet() = default;
 
+void VertexSet::Clear() {
+  vertex_val_.resize(0, 4);
+  pos_.resize(0, 2);
+  frm_.resize(0, 1);
+  valid_.resize(0, 1);
+}
+
 bool VertexSet::IsVertex(int x, int y) {
   return (x % block_size_ == 0) && (y % block_size_ == 0);
 }

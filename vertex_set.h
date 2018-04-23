@@ -27,6 +27,7 @@ public:
 
   VertexSet();
   ~VertexSet();
+  void Clear();
   bool IsVertex(int x, int y);
   Eigen::Matrix<double, Eigen::Dynamic, 2> FindkNearestVertex(int x, int y, int k);
   Eigen::Vector4i Find4ConnectVertex(int x, int y);

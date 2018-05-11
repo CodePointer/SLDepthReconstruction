@@ -137,16 +137,29 @@ Eigen::Matrix<double, Eigen::Dynamic, 2> NodeSet::FindkNearestNodes(
   return nbr_set;
 };
 
-bool NodeSet::WriteToFile(std::string file_name) {
+bool NodeSet::WriteToFile(std::string file_name, CamSlotsMat * cam_slot,
+                          cv::Mat * img_class) {
   std::fstream file(file_name, std::ios::out);
   if (!file) {
     LOG(ERROR) << "WriteToFile error, file_name=" + file_name;
     return false;
   }
   for (int i = 0; i < len_; i++) {
-    file << (int)valid_(i, 0) << " ";
-    file << (double)val_(i, 0) << " ";
-    file << pos_(i, 0) << " " << pos_(i, 1) << std::endl;
+    int valid = valid_(i, 0);
+    int x = pos_(i, 0);
+    int y = pos_(i, 1);
+    double val = val_(i, 0);
+    int c = -1;
+    double depth = -1.0;
+    if (valid == my::VERIFIED_TRUE) {
+      c = (int)img_class->at<uchar>(y, x);
+      depth = cam_slot->slots_[y][x][c].GetDepthFromPointer(val);
+    }
+
+    file << valid << " ";
+    file << val << " ";
+    file << x << " " << y << " ";
+    file << c << " " << depth << std::endl;
   }
   file.close();
   return true;

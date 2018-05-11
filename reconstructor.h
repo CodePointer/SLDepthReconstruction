@@ -14,14 +14,12 @@
 #include "vertex_set.h"
 #include <ceres/ceres.h>
 #include <ceres/cubic_interpolation.h>
-#include "deform_constraint.h"
 #include <sys/time.h>
 #include <node_set.h>
 #include "intensity_slot.h"
-//#include "deform_cost_functor.h"
-#include "regular_constraint.h"
-//#include "regular_cost_functor.h"
 #include "depth_reg_constraint.h"
+#include "shade_data_constraint.h"
+#include "depth_inter_constraint.h"
 
 static timeval g_time_last;
 

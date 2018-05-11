@@ -16,8 +16,8 @@ const int kProHeight = 800;
 const int kProWidth = 1280;
 
 const int kIntensityClassNum = 2;
-const int kTemporalWindowSize = 5;
-const int kNodeBlockSize = 8;
+const int kTemporalWindowSize = 4;
+const int kNodeBlockSize = 4;
 const double kDepthMin = 15.0;
 const double kDepthMax = 47.0;
 const int kGridSize = 45;

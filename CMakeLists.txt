@@ -29,12 +29,16 @@ add_executable(SLDepthReconstruction
 #        optimizer/regular_cost_functor.h
 #        optimizer/regular_cost_functor.cpp
         global/global_fun.cpp
-        optimizer/deform_constraint.cpp
-        optimizer/deform_constraint.h
-        optimizer/regular_constraint.cpp
-        optimizer/regular_constraint.h
         DataStructure/intensity_slot.cpp
-        DataStructure/intensity_slot.h optimizer/spatial_constraint.cpp optimizer/spatial_constraint.h optimizer/temporal_constraint.cpp optimizer/temporal_constraint.h optimizer/shade_data_constraint.cpp optimizer/shade_data_constraint.h optimizer/shade_reg_constraint.cpp optimizer/shade_reg_constraint.h DataStructure/node_set.cpp DataStructure/node_set.h optimizer/depth_reg_constraint.cpp optimizer/depth_reg_constraint.h)
+        DataStructure/intensity_slot.h
+        optimizer/shade_data_constraint.cpp
+        optimizer/shade_data_constraint.h
+        optimizer/shade_reg_constraint.cpp
+        optimizer/shade_reg_constraint.h
+        DataStructure/node_set.cpp
+        DataStructure/node_set.h
+        optimizer/depth_reg_constraint.cpp
+        optimizer/depth_reg_constraint.h optimizer/depth_inter_constraint.cpp optimizer/depth_inter_constraint.h)
 
 target_link_libraries(SLDepthReconstruction
         ceres

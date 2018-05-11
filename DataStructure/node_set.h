@@ -7,6 +7,7 @@
 
 #include "static_para.h"
 #include "global_fun.h"
+#include "intensity_slot.h"
 #include <Eigen/Eigen>
 
 class NodeSet {
@@ -28,7 +29,8 @@ public:
   void GetNodeCoordByIdx(int idx, int * h, int * w);
   bool SetNodePos(int idx, int x, int y);
   Eigen::Matrix<double, Eigen::Dynamic, 2> FindkNearestNodes(int x, int y, int k);
-  bool WriteToFile(std::string file_name);
+  bool WriteToFile(std::string file_name, CamSlotsMat * cam_slot,
+                   cv::Mat * img_class);
 };
 
 

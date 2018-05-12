@@ -39,6 +39,7 @@ private:
   ////////////////////////////////////////////////////////////////
   std::string main_file_path_;
   std::string pattern_file_name_;
+  std::string class_file_name_;
   std::string pattern_file_suffix_;
   std::string dyna_file_path_;
   std::string dyna_file_name_;
@@ -53,6 +54,7 @@ private:
   std::string rots_name_;
   std::string trans_name_;
   std::string light_name_;
+  std::string hard_mask_name_;
 //  std::string hard_mask_file_name_;
   ////////////////////////////////////////////////////////////////
   /// Input data & output data part.
@@ -65,10 +67,10 @@ private:
   CamSlotsMat * cam_slots_;
   VertexSet * vertex_set_;
   cv::Mat pattern_;
+  cv::Mat pattern_class_;
   cv::Mat epi_A_mat_;
   cv::Mat epi_B_mat_;
   cv::Mat hard_mask_; // No value pixels because of calibration
-  //TODO: Control Set
 
   ////////////////////////////////////////////////////////////////
   /// Storage file names.
@@ -81,7 +83,8 @@ private:
   /// Optimization part. Related parameters.
   ////////////////////////////////////////////////////////////////
   ceres::BiCubicInterpolator<ceres::Grid2D<double, 1>> * pat_grid_;
-  double inten_thred_;
+  double pattern_lower_;
+  double pattern_higher_;
 
   // Functions:
   bool LoadDatasFromFiles();

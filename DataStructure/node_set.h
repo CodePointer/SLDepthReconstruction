@@ -27,6 +27,9 @@ public:
   bool IsNode(int x, int y);
   void GetNodeCoordByPos(int x, int y, int * h, int * w);
   void GetNodeCoordByIdx(int idx, int * h, int * w);
+  int GetIdxByNodeCoord(int h, int w, bool valid_flag = true);
+  void GetTriVertexIdx(int x, int y, std::vector<int>* res);
+  void GetNearestkNodesIdx(int x, int y, std::vector<int>* res);
   bool SetNodePos(int idx, int x, int y);
   Eigen::Matrix<double, Eigen::Dynamic, 2> FindkNearestNodes(int x, int y, int k);
   bool WriteToFile(std::string file_name, CamSlotsMat * cam_slot,

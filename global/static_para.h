@@ -15,9 +15,9 @@ const int kCamVecSize = kCamHeight * kCamWidth;
 const int kProHeight = 800;
 const int kProWidth = 1280;
 
-const int kIntensityClassNum = 2;
+const int kIntensityClassNum = 4;
 const int kTemporalWindowSize = 4;
-const int kNodeBlockSize = 4;
+const int kNodeBlockSize = 8;
 const double kDepthMin = 15.0;
 const double kDepthMax = 47.0;
 const int kGridSize = 45;
@@ -29,10 +29,10 @@ const int kNearestPoints = 8; // Used for neighbor interpolation
 const int kRegularNbr = 8;
 
 // For k_means
-const int kKMBlockHeightNum = 16;
-const int kKMBlockWidthNum = 16;
-const int kKMBlockHeight = 64;
-const int kKMBlockWidth = 80;
+const int kKMBlockHeightNum = 8;
+const int kKMBlockWidthNum = 8;
+const int kKMBlockHeight = 128;
+const int kKMBlockWidth = 160;
 
 typedef Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> ImgMatrix;
 

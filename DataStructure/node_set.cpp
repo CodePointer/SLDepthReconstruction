@@ -56,6 +56,117 @@ void NodeSet::GetNodeCoordByIdx(int idx, int * h, int * w) {
   }
 }
 
+int NodeSet::GetIdxByNodeCoord(int h, int w, bool valid_flag) {
+  if (h < 0 || h >= block_height_ || w < 0 || w >= block_width_) {
+    return -1;
+  }
+  int idx = h * block_width_ + w;
+  if (valid_flag && valid_(idx, 0) != my::VERIFIED_TRUE) {
+    return -1;
+  }
+  return idx;
+}
+
+void NodeSet::GetTriVertexIdx(int x, int y, std::vector<int>* res) {
+  res->clear();
+  // Check self
+  int h, w;
+  GetNodeCoordByPos(x, y, &h, &w);
+  int idx = h * block_width_ + w;
+  if (valid_(idx, 0) != my::VERIFIED_TRUE) {
+    return;
+  }
+  // Add sets
+  std::vector<Eigen::Vector3i> tri_sets;
+  int idx_l = GetIdxByNodeCoord(h, w - 1);
+  int idx_lu = GetIdxByNodeCoord(h - 1, w - 1);
+  int idx_u = GetIdxByNodeCoord(h - 1, w);
+  int idx_r = GetIdxByNodeCoord(h, w + 1);
+  int idx_rd = GetIdxByNodeCoord(h + 1, w + 1);
+  int idx_d = GetIdxByNodeCoord(h + 1, w);
+  if (idx_lu > 0 && idx_l > 0) {
+    tri_sets.push_back(Eigen::Vector3i({idx, idx_lu, idx_l}));
+  }
+  if (idx_u > 0 && idx_lu > 0) {
+    tri_sets.push_back(Eigen::Vector3i({idx, idx_u, idx_lu}));
+  }
+  if (idx_r > 0 && idx_u > 0) {
+    tri_sets.push_back(Eigen::Vector3i({idx, idx_r, idx_u}));
+  }
+  if (idx_rd > 0 && idx_r > 0) {
+    tri_sets.push_back(Eigen::Vector3i({idx, idx_rd, idx_r}));
+  }
+  if (idx_d > 0 && idx_rd > 0) {
+    tri_sets.push_back(Eigen::Vector3i({idx, idx_d, idx_rd}));
+  }
+  if (idx_l > 0 && idx_d > 0) {
+    tri_sets.push_back(Eigen::Vector3i({idx, idx_l, idx_d}));
+  }
+
+  // Find triangle
+  for (int i = 0; i < tri_sets.size(); i++) {
+    Eigen::Vector3i vertex_set = tri_sets[i];
+    double sign = 1.0;
+    for (int k = 0; k < 3; k++) {
+      int idx_a = vertex_set(k, 0);
+      int idx_b = vertex_set((k + 1) % 3, 0);
+      double x_a = pos_(idx_a, 0);
+      double x_b = pos_(idx_b, 0);
+      double y_a = pos_(idx_a, 1);
+      double y_b = pos_(idx_b, 1);
+      double d_x_a = x_a - x;
+      double d_y_a = y_a - y;
+      double d_x_b = x_b - x;
+      double d_y_b = y_b - y;
+      if (d_x_a*d_y_b - d_y_a*d_x_b > 0) {
+        sign = -1.0;
+      }
+    }
+    if (sign >= 0) {
+      res->push_back(vertex_set(0));
+      res->push_back(vertex_set(1));
+      res->push_back(vertex_set(2));
+    }
+  }
+  return;
+}
+
+// 3 points
+void NodeSet::GetNearestkNodesIdx(int x, int y, std::vector<int>* res) {
+  res->clear();
+  int h, w;
+  GetNodeCoordByPos(x, y, &h, &w);
+  std::vector<std::pair<double, int>> tmp;
+  for (int h_s = h - 1; h_s <= h + 1; h_s++) {
+    for (int w_s = w - 1; w_s <= w + 1; w_s++) {
+      if (h_s < 0 || h_s >= block_height_ || w_s < 0 || w_s >= block_width_) {
+        continue;
+      }
+      int idx = h_s * block_width_ + w_s;
+      if (valid_(idx, 0) == my::VERIFIED_TRUE) {
+        double pos_x = pos_(idx, 0);
+        double pos_y = pos_(idx, 1);
+        double dist = sqrt(std::pow(pos_x - x, 2) + std::pow(pos_y - y, 2));
+        tmp.emplace_back(std::pair<double, int>(dist, idx));
+      }
+    }
+  }
+  // Find nearest 3 points
+  if (tmp.size() < 3) {
+    return;
+  }
+  for (int i = 0; i < 3; i++) {
+    for (int j = (int)tmp.size() - 1; j > 0; j--) {
+      if (tmp[j].first < tmp[j - 1].first) {
+        std::pair<double, int> tmp_pair = tmp[j];
+        tmp[j] = tmp[j - 1];
+        tmp[j - 1] = tmp_pair;
+      }
+    }
+    res->push_back(tmp[i].second);
+  }
+}
+
 bool NodeSet::SetNodePos(int idx, int x, int y) {
   int h, w;
   GetNodeCoordByIdx(idx, &h, &w);

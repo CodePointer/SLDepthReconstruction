@@ -55,6 +55,7 @@ int FloodFill(cv::Mat map, int h, int w, uchar replace, uchar valid_val);
 
 template <class T>
 int ShowMat(cv::Mat * mat, std::string win_name, int delay, T min, T max,
+            bool close_flag = true,
             cv::Mat * p_norm = nullptr) {
   cv::Mat show_mat;
   show_mat.create(mat->size(), CV_8UC1);
@@ -79,10 +80,14 @@ int ShowMat(cv::Mat * mat, std::string win_name, int delay, T min, T max,
     show_mat.copyTo(*p_norm);
   }
 
-  cv::namedWindow(win_name);
+  if (close_flag) {
+    cv::namedWindow(win_name);
+  }
   cv::imshow(win_name, show_mat);
   int key = cv::waitKey(delay);
-  cv::destroyWindow(win_name);
+  if (close_flag) {
+    cv::destroyWindow(win_name);
+  }
   return key;
 }
 

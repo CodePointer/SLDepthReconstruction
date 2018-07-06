@@ -38,7 +38,7 @@ add_executable(SLDepthReconstruction
         DataStructure/node_set.cpp
         DataStructure/node_set.h
         optimizer/depth_reg_constraint.cpp
-        optimizer/depth_reg_constraint.h optimizer/depth_inter_constraint.cpp optimizer/depth_inter_constraint.h)
+        optimizer/depth_reg_constraint.h optimizer/depth_inter_constraint.cpp optimizer/depth_inter_constraint.h optimizer/depth_spacial_constraint.cpp optimizer/depth_spacial_constraint.h optimizer/depth_temporal_constraint.cpp optimizer/depth_temporal_constraint.h optimizer/depth_consist_constraint.cpp optimizer/depth_consist_constraint.h)
 
 target_link_libraries(SLDepthReconstruction
         ceres

@@ -10,6 +10,7 @@ NodeSet::NodeSet() {
   block_width_ = kCamWidth / block_size_;
   len_ = block_height_ * block_width_;
   val_ = Eigen::Matrix<double, Eigen::Dynamic, 1>::Zero(len_, 1);
+  bound_ = Eigen::Matrix<double, Eigen::Dynamic, 2>::Zero(len_, 2);
   pos_ = Eigen::Matrix<int, Eigen::Dynamic, 2>::Zero(len_, 2);
   valid_ = Eigen::Matrix<uchar, Eigen::Dynamic, 1>::Zero(len_, 1);
   for (int h = 0; h < block_height_; h++) {
@@ -25,6 +26,7 @@ NodeSet::~NodeSet() = default;
 
 void NodeSet::Clear() {
   val_.resize(0, 1);
+  bound_.resize(0, 2);
   pos_.resize(0, 2);
   valid_.resize(0, 1);
 }
@@ -248,8 +250,7 @@ Eigen::Matrix<double, Eigen::Dynamic, 2> NodeSet::FindkNearestNodes(
   return nbr_set;
 };
 
-bool NodeSet::WriteToFile(std::string file_name, CamSlotsMat * cam_slot,
-                          cv::Mat * img_class) {
+bool NodeSet::WriteToFile(std::string file_name) {
   std::fstream file(file_name, std::ios::out);
   if (!file) {
     LOG(ERROR) << "WriteToFile error, file_name=" + file_name;
@@ -260,17 +261,14 @@ bool NodeSet::WriteToFile(std::string file_name, CamSlotsMat * cam_slot,
     int x = pos_(i, 0);
     int y = pos_(i, 1);
     double val = val_(i, 0);
+    double lower = bound_(i, 0);
+    double upper = bound_(i, 1);
     int c = -1;
-    double depth = -1.0;
-    if (valid == my::VERIFIED_TRUE) {
-      c = (int)img_class->at<uchar>(y, x);
-      depth = cam_slot->slots_[y][x][c].GetDepthFromPointer(val);
-    }
 
     file << valid << " ";
     file << val << " ";
     file << x << " " << y << " ";
-    file << c << " " << depth << std::endl;
+    file << lower << " " << upper << std::endl;
   }
   file.close();
   return true;

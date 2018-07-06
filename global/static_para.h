@@ -17,11 +17,10 @@ const int kProWidth = 1280;
 
 const int kIntensityClassNum = 4;
 const int kTemporalWindowSize = 4;
-const int kNodeBlockSize = 8;
+const int kNodeBlockSize = 16;
 const double kDepthMin = 15.0;
 const double kDepthMax = 47.0;
-const int kGridSize = 45;
-const int kFrameNum = 90;
+const int kGridSize = 15;
 const uchar kMaskIntensityThred = 10;
 const int kMaskMinAreaThred = 40;
 const double kDepthRad = 2;
@@ -58,15 +57,16 @@ namespace my {
 struct CamMatSet {
   cv::Mat img_obs;
   cv::Mat img_class;
-  cv::Mat img_class_p;
-  cv::Mat shade_mat;
-  cv::Mat img_est;
+//  cv::Mat img_class_p;
+//  cv::Mat shade_mat;
+//  cv::Mat img_est;
   cv::Mat x_pro;
   cv::Mat y_pro;
   cv::Mat depth;
+  cv::Mat x_pro_range;
   ImgMatrix pointer;
   cv::Mat mask;
-  Eigen::Matrix<double, kIntensityClassNum, Eigen::Dynamic> km_center;
+//  Eigen::Matrix<double, kIntensityClassNum, Eigen::Dynamic> km_center;
   Eigen::Matrix<double, 3, Eigen::Dynamic> norm_vec;
 };
 

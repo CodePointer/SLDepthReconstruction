@@ -37,24 +37,25 @@ private:
   ///  -->epi_A_file_name_, epi_B_file_name_
   ///  -->cam_matrix, pro_matrix, rot, trans, light_vec
   ////////////////////////////////////////////////////////////////
+  int kFrameNum;
   std::string main_file_path_;
-  std::string pattern_file_name_;
-  std::string class_file_name_;
-  std::string pattern_file_suffix_;
+//  std::string pattern_file_name_;
+//  std::string class_file_name_;
+//  std::string pattern_file_suffix_;
   std::string dyna_file_path_;
   std::string dyna_file_name_;
   std::string dyna_file_suffix_;
   std::string pro_file_path_;
   std::string pro_file_name_;
   std::string pro_file_suffix_;
-  std::string epi_A_file_name_;
-  std::string epi_B_file_name_;
+//  std::string epi_A_file_name_;
+//  std::string epi_B_file_name_;
   std::string cam_matrix_name_;
   std::string pro_matrix_name_;
   std::string rots_name_;
   std::string trans_name_;
-  std::string light_name_;
-  std::string hard_mask_name_;
+//  std::string light_name_;
+//  std::string hard_mask_name_;
 //  std::string hard_mask_file_name_;
   ////////////////////////////////////////////////////////////////
   /// Input data & output data part.
@@ -64,13 +65,13 @@ private:
   CalibSet calib_set_;
   CamMatSet * cam_set_;
   NodeSet * node_set_;
-  CamSlotsMat * cam_slots_;
-  VertexSet * vertex_set_;
-  cv::Mat pattern_;
-  cv::Mat pattern_class_;
-  cv::Mat epi_A_mat_;
-  cv::Mat epi_B_mat_;
-  cv::Mat hard_mask_; // No value pixels because of calibration
+//  CamSlotsMat * cam_slots_;
+//  VertexSet * vertex_set_;
+//  cv::Mat pattern_;
+//  cv::Mat pattern_class_;
+//  cv::Mat epi_A_mat_;
+//  cv::Mat epi_B_mat_;
+//  cv::Mat hard_mask_; // No value pixels because of calibration
 
   ////////////////////////////////////////////////////////////////
   /// Storage file names.
@@ -88,7 +89,10 @@ private:
 
   // Functions:
   bool LoadDatasFromFiles();
-  void ConvXpro2Depth(CamMatSet * ptr_cam_set);
+  void LoadPatternEpiInfo();
+  void ConvXpro2Depth(int frm_idx, bool create_flag = true);
+  void ConvDepth2Xpro(int frm_idx, bool create_flag = true);
+  void FillDepthWithMask(int frm_idx);
   void SetMaskMatFromXpro(int frm_idx);
 
   void SetFirstFrameVertex(int frm_idx);
@@ -96,8 +100,9 @@ private:
   void SetMaskMatFromIobs(int frm_idx);
   void PredictInitialShadeVertex(int frm_idx);
   void FillShadeMatFromVertex(int frm_idx);
-  void RecoIntensityClass(int frm_idx);
+  void RecoColorClass(int frm_idx);
   void GenerateIntensitySlots(int frm_idx);
+  void PredictXproRange(int frm_idx);
   void PredictInitialDepthVal(int frm_idx);
   void RefineInitialDepthVal(int frm_idx);
 

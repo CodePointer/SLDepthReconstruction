@@ -1,6 +1,7 @@
 #include "reconstructor.h"
 
 int main(int argc, char* argv[]) {
+  // GLOG Related.
   google::InitGoogleLogging(argv[0]);
   FLAGS_log_dir = "./log/";
   FLAGS_logbufsecs = 0;

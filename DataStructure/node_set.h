@@ -18,6 +18,7 @@ public:
   int len_;
 
   Eigen::Matrix<double, Eigen::Dynamic, 1> val_;
+  Eigen::Matrix<double, Eigen::Dynamic, 2> bound_;
   Eigen::Matrix<int, Eigen::Dynamic, 2> pos_;
   Eigen::Matrix<uchar, Eigen::Dynamic, 1> valid_;
 
@@ -32,8 +33,7 @@ public:
   void GetNearestkNodesIdx(int x, int y, std::vector<int>* res);
   bool SetNodePos(int idx, int x, int y);
   Eigen::Matrix<double, Eigen::Dynamic, 2> FindkNearestNodes(int x, int y, int k);
-  bool WriteToFile(std::string file_name, CamSlotsMat * cam_slot,
-                   cv::Mat * img_class);
+  bool WriteToFile(std::string file_name);
 };
 
 

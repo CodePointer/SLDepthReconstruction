@@ -92,7 +92,7 @@ private:
   void LoadPatternEpiInfo();
   void ConvXpro2Depth(int frm_idx, bool create_flag = true);
   void ConvDepth2Xpro(int frm_idx, bool create_flag = true);
-  void FillDepthWithMask(int frm_idx);
+  void FillMatWithMask(cv::Mat * ptr_mask, cv::Mat * ptr_mat);
   void SetMaskMatFromXpro(int frm_idx);
 
   void SetFirstFrameVertex(int frm_idx);

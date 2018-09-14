@@ -157,7 +157,7 @@ bool Reconstructor::LoadDatasFromFiles() {
 /// Change: <null>
 /// Without interpolation.
 void Reconstructor::ConvXpro2Depth(int frm_idx, bool create_flag) {
-  LOG(INFO) << "Start: ConvXpro2Depth()";
+  LOG(INFO) << "Start: ConvXpro2Depth(" << frm_idx << ")";
   if (create_flag) {
     cam_set_[frm_idx].depth.create(kCamHeight, kCamWidth, CV_64FC1);
     cam_set_[frm_idx].depth.setTo(-1.0);
@@ -169,6 +169,7 @@ void Reconstructor::ConvXpro2Depth(int frm_idx, bool create_flag) {
       double x_pro = cam_set_[frm_idx].x_pro.at<double>(h, w);
       if (x_pro < 0) {
         continue;
+        // WARNING: Invalid depth mask
       }
       double depth = GetDepthFromXpro(x_pro, h, w, &calib_set_);
       cam_set_[frm_idx].depth.at<double>(h, w) = depth;
@@ -177,7 +178,7 @@ void Reconstructor::ConvXpro2Depth(int frm_idx, bool create_flag) {
 //  cv::namedWindow("test");
 //  cv::imshow("test", (ptr_cam_set->depth/100));
 //  cv::waitKey(0);
-  LOG(INFO) << "End: ConvXpro2Depth()";
+  LOG(INFO) << "End: ConvXpro2Depth(" << frm_idx << ")";
 }
 
 /// ConvXpro2Depth: xpro_mat -> depth_mat.
@@ -186,7 +187,7 @@ void Reconstructor::ConvXpro2Depth(int frm_idx, bool create_flag) {
 /// Change: <null>
 /// Without interpolation.
 void Reconstructor::ConvDepth2Xpro(int frm_idx, bool create_flag) {
-  LOG(INFO) << "Start: ConvDepth2Xpro()";
+  LOG(INFO) << "Start: ConvDepth2Xpro(" << frm_idx << ")";
   if (create_flag) {
     cam_set_[frm_idx].x_pro.create(kCamHeight, kCamWidth, CV_64FC1);
     cam_set_[frm_idx].x_pro.setTo(-1.0);
@@ -206,41 +207,43 @@ void Reconstructor::ConvDepth2Xpro(int frm_idx, bool create_flag) {
 //  cv::namedWindow("test");
 //  cv::imshow("test", (ptr_cam_set->depth/100));
 //  cv::waitKey(0);
-  LOG(INFO) << "End: ConvDepth2Xpro()";
+  LOG(INFO) << "End: ConvDepth2Xpro(" << frm_idx << ")";
 }
 
-/// FillDepthWithMask: fill depth_mat for every point in mask.
-/// Need: mask, depth
+/// FillDepthWithMask: fill depth_mat/pro_mat for every point in mask.
+/// Need: mask, depth/x_pro
 /// Create: <null>
-/// Change: depth
-/// Use expanded methods. depth <= 0 -> invalid points.
-void Reconstructor::FillDepthWithMask(int frm_idx) {
-  LOG(INFO) << "Start: FillDepthWithMask(" << frm_idx << ")";
+/// Change: depth/x_pro
+/// Use expanded methods. mat <= 0 -> invalid points.
+void Reconstructor::FillMatWithMask(cv::Mat * ptr_mask, cv::Mat * ptr_mat) {
+  LOG(INFO) << "Start: FillMatWithMask";
   bool expand_flag = true;
-  cv::Mat tmp_depth_mat;
-  cam_set_[frm_idx].depth.copyTo(tmp_depth_mat);
+  cv::Mat tmp_value_mat;
+  ptr_mat->copyTo(tmp_value_mat);
+  int found_num = 0;
   while (expand_flag) {
     expand_flag = false;
     for (int h = 0; h < kCamHeight; h++) {
       for (int w = 0; w < kCamWidth; w++) {
-        if (cam_set_[frm_idx].mask.at<uchar>(h, w) != my::VERIFIED_TRUE)
+        if (ptr_mask->at<uchar>(h, w) != my::VERIFIED_TRUE)
           continue;
-        if (cam_set_[frm_idx].depth.at<double>(h, w) > 0) {
+        if (ptr_mat->at<double>(h, w) > 0) {
           int h_n[4] = {h-1, h, h+1, h};
           int w_n[4] = {w, w-1, w, w+1};
           for (int i = 0; i < 4; i++) {
-            if (cam_set_[frm_idx].depth.at<double>(h_n[i], w_n[i]) <= 0) {
+            if (ptr_mat->at<double>(h_n[i], w_n[i]) <= 0) {
               expand_flag = true;
-              tmp_depth_mat.at<double>(h_n[i], w_n[i])
-                  = cam_set_[frm_idx].depth.at<double>(h, w);
+              tmp_value_mat.at<double>(h_n[i], w_n[i])
+                  = ptr_mat->at<double>(h, w);
+              found_num += 1;
             }
           }
         }
       }
     }
-    tmp_depth_mat.copyTo(cam_set_[frm_idx].depth);
+    tmp_value_mat.copyTo(*ptr_mat);
   }
-  LOG(INFO) << "End: FillDepthWithMask(" << frm_idx << ")";
+  LOG(INFO) << "End: FillMatWithMask. Found num: " << found_num;
 }
 
 bool Reconstructor::Run() {
@@ -257,8 +260,9 @@ bool Reconstructor::Run() {
   SetMaskMatFromIobs(0);
   RecoColorClass(0);
   ConvXpro2Depth(0, true);
-  FillDepthWithMask(0);
+  FillMatWithMask(&(cam_set_[0].mask), &(cam_set_[0].depth));
   ConvDepth2Xpro(0, false);
+  FillMatWithMask(&(cam_set_[0].mask), &(cam_set_[0].x_pro));
   LOG(INFO) << "First frame process finished.";
 
   ///------------------------------///
@@ -275,6 +279,7 @@ bool Reconstructor::Run() {
     // Predict x_pro, depth from last frame.
     PredictXproRange(frm_idx);
     ConvXpro2Depth(frm_idx, true);
+//    FillMatWithMask(&(cam_set_[frm_idx].mask), &(cam_set_[frm_idx].depth));
 //    ShowMat<ushort>(&cam_set_[frm_idx].x_pro_range, "pro_range", 0, 100, 1200);
 //    ShowMat<double>(&cam_set_[frm_idx].depth, "DepthRange", 0, 10, 30);
 
@@ -285,9 +290,10 @@ bool Reconstructor::Run() {
     // Fill other points of node mat (For next frame usage)
     SetDepthValFromNode(frm_idx);
 //    ShowMat<double>(&(cam_set_[frm_idx].depth), "depth_before", 0, 15, 30);
-    FillDepthWithMask(frm_idx);
+    FillMatWithMask(&(cam_set_[frm_idx].mask), &(cam_set_[frm_idx].depth));
 //    ShowMat<double>(&(cam_set_[frm_idx].depth), "depth_after", 0, 15, 30);
     ConvDepth2Xpro(frm_idx, false);
+//    FillMatWithMask(&(cam_set_[frm_idx].mask), &(cam_set_[frm_idx].x_pro));
 
     ShowMat<double>(&cam_set_[frm_idx].x_pro, "x_pro", 10, 200, 1000, false);
 
@@ -409,7 +415,7 @@ void Reconstructor::RecoColorClass(int frm_idx) {
 /// PredictXproRange: predict initial x_pro_range from history.
 /// Need: mask[t], img_class[t], x_pro[t-1]
 /// Create: x_pro_range[t], x_pro[t]
-/// Change: <null>
+/// Change: mask
 /// By last frame average x_pro value. 7*7 for now.
 void Reconstructor::PredictXproRange(int frm_idx) {
   LOG(INFO) << "Start: PredictXproRange(" << frm_idx << ")";
@@ -417,6 +423,21 @@ void Reconstructor::PredictXproRange(int frm_idx) {
   cam_set_[frm_idx].x_pro_range.setTo(0);
   cam_set_[frm_idx].x_pro.create(kCamHeight, kCamWidth, CV_64FC1);
   cam_set_[frm_idx].x_pro.setTo(-1);
+
+  // Propagate last frame info to current frame
+  cv::Mat last_xpro_info(kCamHeight, kCamWidth, CV_64FC1);
+  last_xpro_info.setTo(-1);
+  for (int h = 0; h < kCamHeight; h++) {
+    for (int w = 0; w < kCamWidth; w++) {
+      if (cam_set_[frm_idx].mask.at<uchar>(h, w) != my::VERIFIED_TRUE)
+        continue;
+      if (cam_set_[frm_idx - 1].mask.at<uchar>(h, w) != my::VERIFIED_TRUE)
+        continue;
+      last_xpro_info.at<double>(h, w)
+          = cam_set_[frm_idx - 1].x_pro.at<double>(h, w);
+    }
+  }
+  FillMatWithMask(&(cam_set_[frm_idx].mask), &last_xpro_info);
 
   int kWinRad = 7;
   double kStripDis = 12;
@@ -432,9 +453,9 @@ void Reconstructor::PredictXproRange(int frm_idx) {
         for (int nw = w - kWinRad; nw <= w + kWinRad; nw++) {
           if (nh < 0 || nh >= kCamHeight || nw < 0 || nw >= kCamWidth)
             continue;
-          if (cam_set_[frm_idx - 1].mask.at<uchar>(nh, nw) != my::VERIFIED_TRUE)
+          if (last_xpro_info.at<double>(nh, nw) < 0)
             continue;
-          last_x_pro_value += cam_set_[frm_idx - 1].x_pro.at<double>(nh, nw);
+          last_x_pro_value += last_xpro_info.at<double>(nh, nw);
           last_x_pro_count += 1;
         }
       }
@@ -457,6 +478,10 @@ void Reconstructor::PredictXproRange(int frm_idx) {
       // Set x_pro from x_pro_range
       cam_set_[frm_idx].x_pro.at<double>(h, w)
           = (double)cam_set_[frm_idx].x_pro_range.at<ushort>(h, w);
+      if (cam_set_[frm_idx].x_pro_range.at<ushort>(h, w) == 0) {
+//        std::cout << "Error: " << h << "," << w << std::endl;
+        cam_set_[frm_idx].mask.at<uchar>(h, w) = my::VERIFIED_FALSE;
+      }
     }
   }
   LOG(INFO) << "End: PredictXproRange(" << frm_idx << ")";
@@ -468,7 +493,7 @@ void Reconstructor::PredictXproRange(int frm_idx) {
 /// \Change: node[t]
 /// Use spatial & temporal constraint.
 /// Also, set upper-bound & lower-bound for optimization.
-void Reconstructor::OptimizeDepthNode(int frm_idx) { // TODO: temporal
+void Reconstructor::OptimizeDepthNode(int frm_idx) {
   LOG(INFO) << "Start: OptimizeDepthNode(" << frm_idx << ")";
 
   // parameters:
@@ -717,6 +742,8 @@ void Reconstructor::SetDepthValFromNode(int frm_idx) {
         double depth = (1-u-v) * D1 + u * D2 + v * D3;
         cam_set_[frm_idx].depth.at<double>(h, w) = depth;
       } else {
+//        std::cout << h << "," << w << std::endl;
+//        std::cout << cam_set_[frm_idx].depth.at<double>(h, w) << std::endl;
 //        std::cout << "A:" << std::endl;
 //        std::cout << A << std::endl;
 //        std::cout << B << std::endl;
@@ -724,6 +751,7 @@ void Reconstructor::SetDepthValFromNode(int frm_idx) {
 //        LOG(FATAL) << "Invalid tri at:" << h << ", " << w;
 //        std::cout << h << "," << w << std::endl;
         continue;
+        // WARNING: Depth empty hole
       }
     }
   }

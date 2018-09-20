@@ -6,6 +6,7 @@
 #include <depth_spacial_constraint.h>
 #include <depth_temporal_constraint.h>
 #include <depth_consist_constraint.h>
+#include <color_consist_constraint.h>
 #include "reconstructor.h"
 
 Reconstructor::Reconstructor() {
@@ -48,7 +49,7 @@ bool Reconstructor::Init() {
   // Set file path
   // Used for input and output.
   kFrameNum = 300;
-  main_file_path_ = "/home/pointer/CLionProjects/Data/20180624/HandMove_BlkDis/";
+  main_file_path_ = "/home/pointer/CLionProjects/Data/20180816/HandBand/";
 //  pattern_file_name_ = "pattern_4size4color0.png";
 //  class_file_name_ = "class_4size4color0.png";
 //  pattern_file_suffix_ = ".png";
@@ -295,10 +296,12 @@ bool Reconstructor::Run() {
     ConvDepth2Xpro(frm_idx, false);
 //    FillMatWithMask(&(cam_set_[frm_idx].mask), &(cam_set_[frm_idx].x_pro));
 
-    ShowMat<double>(&cam_set_[frm_idx].x_pro, "x_pro", 10, 200, 1000, false);
+    ShowMat<double>(&cam_set_[frm_idx].depth, "depth", 10, 35, 50, false);
 
     if (frm_idx - kTemporalWindowSize > 1) {
       SetDepthValFromNode(frm_idx - kTemporalWindowSize - 1);
+      FillMatWithMask(&(cam_set_[frm_idx - kTemporalWindowSize - 1].mask),
+                      &(cam_set_[frm_idx - kTemporalWindowSize - 1].depth));
       ConvDepth2Xpro(frm_idx - kTemporalWindowSize - 1, false);
       std::cout << "Writing & Releasing frm: "
                 << frm_idx - kTemporalWindowSize - 1 << std::endl;
@@ -378,7 +381,7 @@ void Reconstructor::SetMaskMatFromIobs(int frm_idx) {
 //      }
 //    }
 //  }
-//  cv::imshow("test", cam_set_[frm_idx].mask * 255);
+//  cv::imshow("mask", cam_set_[frm_idx].mask * 255);
 //  cv::waitKey(0);
 
   LOG(INFO) << "End: SetMaskMatFromIobs(" << frm_idx << ");";
@@ -440,8 +443,6 @@ void Reconstructor::PredictXproRange(int frm_idx) {
   FillMatWithMask(&(cam_set_[frm_idx].mask), &last_xpro_info);
 
   int kWinRad = 7;
-  double kStripDis = 12;
-  double kClassNum = 6;
   for (int h = 0; h < kCamHeight; h++) {
     for (int w = 0; w < kCamWidth; w++) {
       if (cam_set_[frm_idx].mask.at<uchar>(h, w) != my::VERIFIED_TRUE)
@@ -488,7 +489,7 @@ void Reconstructor::PredictXproRange(int frm_idx) {
 }
 
 /// OptimizeDepthNode: Optimize Node mat by spatial & temporal info
-/// \Need: node[t] x_pro_range[t]
+/// \Need: node[t] x_pro_range[t] mesh_mat[t]
 /// \Create: <null>
 /// \Change: node[t]
 /// Use spatial & temporal constraint.
@@ -498,6 +499,7 @@ void Reconstructor::OptimizeDepthNode(int frm_idx) {
 
   // parameters:
   ceres::Problem problem;
+  int color_block_num = 0;
   int spatial_block_num = 0;
   int temporal_block_num = 0;
   int consist_block_num = 0;
@@ -507,6 +509,50 @@ void Reconstructor::OptimizeDepthNode(int frm_idx) {
   int t_now = frm_idx;
   int block_num = 0;
   for (int t_cen = t_now; t_cen >= t_start; t_cen--) {
+//    std::cout << t_cen << "begin." << std::endl;
+
+    // Data Term
+    for (int h = 0; h < kCamHeight; h++) {
+      for (int w = 0; w < kCamWidth; w++) {
+        if (cam_set_[frm_idx].mask.at<uchar>(h, w) != my::VERIFIED_TRUE)
+          continue;
+        // Add color consist block
+        std::vector<double*> parameter_blocks;
+        std::vector<int> idx_list;
+        ColorConsistConstraint::ColorConsistCostFunction *color_cost_function
+            = ColorConsistConstraint::Create(
+                Num2Str(t_cen) + " " + Num2Str(h) + "," + Num2Str(w),
+                &node_set_[t_cen], &calib_set_,
+                &cam_set_[frm_idx], h, w,
+                &idx_list, &parameter_blocks);
+        if (color_cost_function != nullptr) {
+          if (parameter_blocks[0] == parameter_blocks[1]
+              || parameter_blocks[1] == parameter_blocks[2]
+              || parameter_blocks[0] == parameter_blocks[2]) {
+            ErrorThrow("Duplicated blocks.");
+          }
+          problem.AddResidualBlock(color_cost_function, nullptr,
+                                   parameter_blocks);
+          color_block_num++;
+//          std::cout << color_block_num << std::endl;
+          for (int i = 0; i < idx_list.size(); i++) {
+            int idx = idx_list[i];
+//            if (color_block_num == 193230) {
+//              std::cout << "here" << std::endl;
+//            }
+            problem.SetParameterLowerBound(
+                parameter_blocks[i], 0, node_set_[t_cen].bound_(idx, 0));
+            problem.SetParameterUpperBound(
+                parameter_blocks[i], 0, node_set_[t_cen].bound_(idx, 1));
+          }
+        }
+      }
+    }
+
+//    std::cout << "Data Term finished." << std::endl;
+
+
+    // Regular Term
     for (int idx_cen = 0; idx_cen < node_set_[t_cen].len_; idx_cen++) {
       if (node_set_[t_cen].valid_(idx_cen, 0) != my::VERIFIED_TRUE)
         continue;
@@ -574,6 +620,8 @@ void Reconstructor::OptimizeDepthNode(int frm_idx) {
         }
       }
 
+//      std::cout << idx_cen << " begin." << std::endl;
+
       // Add temporal consistent block
       if (t_cen == t_start + 1 && t_start >= 2) {
         DepthConsistConstraint::DepthCosistCostFunction *
@@ -596,8 +644,13 @@ void Reconstructor::OptimizeDepthNode(int frm_idx) {
           }
         }
       }
+
+//      std::cout << idx_cen << " end." << std::endl;
     }
+//    std::cout << t_cen << "finished." << std::endl;
   }
+
+//  std::cout << "3" << std::endl;
 
   // Solve
   ceres::Solver::Options options;
@@ -614,6 +667,7 @@ void Reconstructor::OptimizeDepthNode(int frm_idx) {
             << spatial_block_num << "," << temporal_block_num << ","
             << consist_block_num;
   std::cout << "Start optimization: " << frm_idx << std::endl;
+  std::cout << "\tColor_block = " << color_block_num << std::endl;
   std::cout << "\tSpatial_block = " << spatial_block_num << std::endl;
   std::cout << "\tTemporal_block = " << temporal_block_num << std::endl;
   std::cout << "\tConsist_block = " << consist_block_num << std::endl;
@@ -626,7 +680,7 @@ void Reconstructor::OptimizeDepthNode(int frm_idx) {
 
 /// SetNodeFromDepthVal: Set node[t] from depth[t], x_pro_range[t]
 /// \Need: mask[t], img_class[t], depth[t]
-/// \Create: node[t]
+/// \Create: node[t], mesh_mat[t], uv_weight[t]
 /// \Change: <null>
 /// Select valid point for node
 /// Also set depth range
@@ -681,10 +735,20 @@ void Reconstructor::SetNodeFromDepthVal(int frm_idx) {
                          - kStripDis / 2;
     double depth_upper = GetDepthFromXpro(x_pro_upper, pos_y, pos_x, &calib_set_);
     double depth_lower = GetDepthFromXpro(x_pro_lower, pos_y, pos_x, &calib_set_);
-    node_set_[frm_idx].bound_(i, 0) = depth_lower;
-    node_set_[frm_idx].bound_(i, 1) = depth_upper;
+//    node_set_[frm_idx].bound_(i, 0) = depth_lower;
+//    node_set_[frm_idx].bound_(i, 1) = depth_upper;
+    node_set_[frm_idx].bound_(i, 0) = depth_upper;
+    node_set_[frm_idx].bound_(i, 1) = depth_lower;
     node_set_[frm_idx].valid_(i, 0) = my::VERIFIED_TRUE;
   }
+
+  cam_set_[frm_idx].mesh_mat.create(kCamHeight, kCamWidth, CV_16UC1);
+  cam_set_[frm_idx].mesh_mat.setTo(0);
+  cam_set_[frm_idx].uv_weight
+      = -Eigen::Matrix<double, 2, Eigen::Dynamic>::Ones(2, kCamHeight * kCamWidth);
+  node_set_[frm_idx].CreateMeshSet();
+  node_set_[frm_idx].FillMatWithMeshIdx(&(cam_set_[frm_idx]));
+
   LOG(INFO) << "End: SetNodeFromDepthVal(" << frm_idx << ")";
 }
 
@@ -710,35 +774,14 @@ void Reconstructor::SetDepthValFromNode(int frm_idx) {
     for (int w = 0; w < kCamWidth; w++) {
       if (cam_set_[frm_idx].mask.at<uchar>(h, w) != my::VERIFIED_TRUE)
         continue;
-      std::vector<int> res;
-//      node_set_[frm_idx].GetNearestkNodesIdx(w, h, &res);
-      node_set_[frm_idx].GetTriVertexIdx(w, h, &res);
-      if (res.empty()) {
-        continue;
-      }
-      double P1x = node_set_[frm_idx].pos_(res[0], 0);
-      double P1y = node_set_[frm_idx].pos_(res[0], 1);
-      double P2x = node_set_[frm_idx].pos_(res[1], 0);
-      double P2y = node_set_[frm_idx].pos_(res[1], 1);
-      double P3x = node_set_[frm_idx].pos_(res[2], 0);
-      double P3y = node_set_[frm_idx].pos_(res[2], 1);
-      Eigen::Matrix<double, 2, 2> A;
-      Eigen::Matrix<double, 2, 1> B;
-      A(0, 0) = P2x - P1x;
-      A(0, 1) = P3x - P1x;
-      A(1, 0) = P2y - P1y;
-      A(1, 1) = P3y - P1y;
-      A << P2x - P1x, P3x - P1x, P2y - P1y, P3y - P1y;
-      B << w - P1x, h - P1y;
-      Eigen::Matrix<double, 2, 1> C = A.inverse() * B;
-      double u = C(0, 0);
-      double v = C(1, 0);
-//      u = std::abs(u) < 1e-4 ? 0 : u;
-//      v = std::abs(v) < 1e-4 ? 0 : v;
+      int idx_mesh = cam_set_[frm_idx].mesh_mat.at<ushort>(h, w);
+      cv::Point3i vertex_set = node_set_[frm_idx].mesh_[idx_mesh];
+      double u = cam_set_[frm_idx].uv_weight(0, h * kCamWidth + w);
+      double v = cam_set_[frm_idx].uv_weight(1, h * kCamWidth + w);
       if (u >= 0 && u <= 1 && v >= 0 && v <= 1 && u+v >= 0 && u+v <= 1) {
-        double D1 = cam_set_[frm_idx].depth.at<double>(P1y, P1x);
-        double D2 = cam_set_[frm_idx].depth.at<double>(P2y, P2x);
-        double D3 = cam_set_[frm_idx].depth.at<double>(P3y, P3x);
+        double D1 = node_set_[frm_idx].val_(vertex_set.x, 0);
+        double D2 = node_set_[frm_idx].val_(vertex_set.y, 0);
+        double D3 = node_set_[frm_idx].val_(vertex_set.z, 0);
         double depth = (1-u-v) * D1 + u * D2 + v * D3;
         cam_set_[frm_idx].depth.at<double>(h, w) = depth;
       } else {
@@ -755,58 +798,9 @@ void Reconstructor::SetDepthValFromNode(int frm_idx) {
       }
     }
   }
-//  ShowMat<double>(&(cam_set_[frm_idx].depth), "depth", 0, 30, 35);
+//  ShowMat<double>(&(cam_set_[frm_idx].depth), "depth", 0, 35, 50);
 
-  // Create optimize problem to fill dense depth mat
-//  ceres::Problem problem;
-//  for (int h = 0; h < kCamHeight; h++) {
-//    for (int w = 0; w < kCamWidth; w++) {
-//      if (cam_set_[frm_idx].mask.at<uchar>(h, w) != my::VERIFIED_TRUE)
-//        continue;
-//      if (node_set_[frm_idx].IsNode(w, h)) {
-//        continue;
-//      }
-//      double * depth_pointer = &(cam_set_[frm_idx].depth.at<double>(h, w));
-//      std::string part_info = "[" + Num2Str(h) + "," + Num2Str(w) + "] -> ";
-//      // Search for nbr:
-//      for (int h_n = h - 1; h_n <= h + 1; h_n++) {
-//        for (int w_n = w - 1; w_n <= w + 1; w_n++) {
-//          if (h == h_n && w == w_n) {
-//            continue;
-//          }
-//          if (h_n < 0 || h_n >= kCamHeight || w_n < 0 || w_n >= kCamWidth) {
-//            continue;
-//          }
-//          if (cam_set_[frm_idx].mask.at<uchar>(h_n, w_n) != my::VERIFIED_TRUE) {
-//            continue;
-//          }
-//          bool flag_fix = node_set_[frm_idx].IsNode(w_n, h_n);
-//          double * nbr_pointer = &(cam_set_[frm_idx].depth.at<double>(h_n, w_n));
-//          std::string info = part_info
-//                             + "[" + Num2Str(h_n) + "," + Num2Str(w_n) + "]";
-//          std::vector<double *> parameter_blocks;
-//          DepthInterConstraint::DepthInterCostFunction *inter_cost_function
-//              = DepthInterConstraint::Create(info, flag_fix, depth_pointer,
-//                                             nbr_pointer, &parameter_blocks);
-//          problem.AddResidualBlock(inter_cost_function, nullptr,
-//                                   parameter_blocks);
-//        }
-//      }
-//    }
-//  }
-//
-//  ceres::Solver::Options solver_options;
-//  solver_options.linear_solver_type = ceres::SPARSE_NORMAL_CHOLESKY;
-//  solver_options.minimizer_progress_to_stdout = true;
-//  solver_options.min_relative_decrease = 1e-9;
-//
-//  ceres::Solver::Summary summary;
-//  Solve(solver_options, &problem, &summary);
-//  LOG(INFO) << summary.BriefReport();
-//  std::cout << summary.BriefReport() << std::endl;
-//  std::cout << summary.message << std::endl;
-
-//  ShowMat<double>(&(cam_set_[frm_idx].depth), "initial_depth", 0, 30.0, 35.0);
+//  ShowMat<double>(&(cam_set_[frm_idx].depth), "initial_depth", 0, 35.0, 50.0);
 
 }
 
@@ -821,6 +815,8 @@ void Reconstructor::OutputResult(int frm_idx) {
   status = SaveMatToTxt(depth_txt_name, cam_set_[frm_idx].depth);
   if (status) LOG(INFO) << depth_txt_name << " success.";
 
+  //
+
   // x_pro mat
   std::string xpro_txt_name
       = output_file_path_ + "x_pro" + Num2Str(frm_idx) + ".txt";
@@ -834,74 +830,11 @@ void Reconstructor::OutputResult(int frm_idx) {
   status = cv::imwrite(xpro_range_png_name, cam_set_[frm_idx].x_pro_range);
   if (status) LOG(INFO) << xpro_range_png_name << "success.";
 
-//  cv::Mat depth_show;
-//  std::string depth_png_name
-//      = output_file_path_ + depth_file_name_ + Num2Str(frm_idx) + ".png";
-//  ShowMat<double>(&(cam_set_[frm_idx].depth), "depth", 10, 30.0, 35.0, &depth_show);
-//  status = cv::imwrite(depth_png_name, depth_show);
-//  if (status) LOG(INFO) << depth_png_name << " success.";
-
-//  // Shade mat
-//  std::string shade_txt_name
-//      = output_file_path_ + "shade" + Num2Str(frm_idx) + ".txt";
-//  status = SaveMatToTxt(shade_txt_name, cam_set_[frm_idx].shade_mat);
-//  if (status) LOG(INFO) << shade_txt_name << " success.";
-//  // Shade mat show
-//  std::string shade_png_name
-//      = output_file_path_ + "shade" + Num2Str(frm_idx) + ".png";
-//  status = cv::imwrite(shade_png_name, cam_set_[frm_idx].shade_mat * 255.0);
-//  if (status) LOG(INFO) << shade_png_name << " success.";
-//
-//  // img_obs
-//  std::string obs_img_name
-//      = output_file_path_ + "I_obs" + Num2Str(frm_idx) + ".png";
-//  status = cv::imwrite(obs_img_name, cam_set_[frm_idx].img_obs);
-//  if (status) LOG(INFO) << obs_img_name << " success.";
-//  // img_est
-//  std::string est_img_name
-//      = output_file_path_ + "I_est" + Num2Str(frm_idx) + ".png";
-//  status = cv::imwrite(est_img_name, cam_set_[frm_idx].img_est);
-//  if (status) LOG(INFO) << est_img_name << " success.";
-  // pattern_class
-//  std::string class_img_name
-//      = output_file_path_ + "I_class" + Num2Str(frm_idx) + ".png";
-//  status = cv::imwrite(class_img_name, cam_set_[frm_idx].img_class);
-//  if (status) LOG(INFO) << class_img_name << " success.";
-
-//  std::string class_img_p_name
-//      = output_file_path_ + "I_class_p" + Num2Str(frm_idx) + ".png";
-//  cv::Mat class_p;
-//  ShowMat<double>(&(cam_set_[frm_idx].img_class_p), "show", 100, 0, 1.0, &class_p);
-//  status = cv::imwrite(class_img_p_name, class_p);
-//  if (status) LOG(INFO) << class_img_p_name << "success.";
-
-  // mask
-//  std::string mask_img_name
-//      = output_file_path_ + "mask" + Num2Str(frm_idx) + ".png";
-//  status = cv::imwrite(mask_img_name, cam_set_[frm_idx].mask);
-//  if (status) LOG(INFO) << class_img_name << " success.";
-
-//  // pointer
-//  std::string pointer_txt_name
-//      = output_file_path_ + "pointer" + Num2Str(frm_idx) + ".txt";
-//  if (frm_idx > 0) {
-//    status = SaveImgMatToTxt(pointer_txt_name, cam_set_[frm_idx].pointer);
-//  }
-
-  // vertex_set
-//  std::string vertex_txt_name
-//      = output_file_path_ + "vertex_val" + Num2Str(frm_idx) + ".txt";
-//  status = SaveValToTxt(vertex_txt_name, vertex_set_[frm_idx].vertex_val_,
-//                        vertex_set_[frm_idx].block_height_,
-//                        vertex_set_[frm_idx].block_width_);
-//  if (status) LOG(INFO) << vertex_txt_name << " success.";
-//  // vertex_valid
-//  std::string valid_txt_name
-//      = output_file_path_ + "valid" + Num2Str(frm_idx) + ".txt";
-//  status = SaveVecUcharToTxt(valid_txt_name, vertex_set_[frm_idx].valid_,
-//                             vertex_set_[frm_idx].block_height_,
-//                             vertex_set_[frm_idx].block_width_);
-//  if (status) LOG(INFO) << valid_txt_name << " success.";
+  // mesh_mat
+  std::string mesh_mat_png_name
+      = output_file_path_ + "mesh_mat" + Num2Str(frm_idx) + ".png";
+  status = cv::imwrite(mesh_mat_png_name, cam_set_[frm_idx].mesh_mat);
+  if (status) LOG(INFO) << mesh_mat_png_name << "success.";
 
   // Node info
   std::string node_txt_name
@@ -927,6 +860,7 @@ void Reconstructor::ReleaseSpace(int frm_idx) {
 //  cam_set_[frm_idx].pointer.resize(0, 0);
 //  cam_set_[frm_idx].km_center.resize(kIntensityClassNum, 0);
 //  cam_set_[frm_idx].norm_vec.resize(3, 0);
+  cam_set_[frm_idx].uv_weight.resize(2, 0);
   // Release NodeSet
   node_set_[frm_idx].Clear();
   // Release vertex_set

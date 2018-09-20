@@ -20,6 +20,7 @@ NodeSet::NodeSet() {
       valid_(idx_i, 0) = my::VERIFIED_FALSE;
     }
   }
+  mesh_.clear();
 }
 
 NodeSet::~NodeSet() = default;
@@ -29,6 +30,102 @@ void NodeSet::Clear() {
   bound_.resize(0, 2);
   pos_.resize(0, 2);
   valid_.resize(0, 1);
+}
+
+bool NodeSet::CreateMeshSet(){
+  for (int h_v = 0; h_v < block_height_; h_v++) {
+    for (int w_v = 0; w_v < block_width_; w_v++) {
+      // (h_v, w_v) is valid
+      int idx_now = GetIdxByNodeCoord(h_v, w_v);
+      if (idx_now < 0)
+        continue;
+      // (h_v,w_v),(h_v,w_v+1),(h_v+1,w_v+1) mesh
+      int idx_r = GetIdxByNodeCoord(h_v, w_v + 1);
+      int idx_rd = GetIdxByNodeCoord(h_v + 1, w_v + 1);
+      if (idx_r > 0 && idx_rd > 0) {
+        mesh_.emplace_back(idx_now, idx_rd, idx_r);
+      }
+      // (h_v,w_v),(h_v+1,w_v),(h_v+1,w_v+1) mesh
+      int idx_d = GetIdxByNodeCoord(h_v + 1, w_v);
+      if (idx_d > 0 && idx_rd > 0) {
+        mesh_.emplace_back(idx_now, idx_d, idx_rd);
+      }
+    }
+  }
+
+  return true;
+}
+
+bool NodeSet::FillMatWithMeshIdx(CamMatSet* cam_set){
+  if (cam_set == nullptr)
+    return false;
+
+  for (int i_m = 0; i_m < mesh_.size(); i_m++) {
+    cv::Point3i mesh_piece = mesh_[i_m];
+    int idx_1 = mesh_piece.x;
+    int idx_2 = mesh_piece.y;
+    int idx_3 = mesh_piece.z;
+    // Find h, w range
+    double P1x = pos_(idx_1, 0);
+    double P2x = pos_(idx_2, 0);
+    double P3x = pos_(idx_3, 0);
+    double P1y = pos_(idx_1, 1);
+    double P2y = pos_(idx_2, 1);
+    double P3y = pos_(idx_3, 1);
+    int h_start, h_end, w_start, w_end = -1;
+    if (P1x >= P2x && P1x >= P3x) {
+      w_end = (int)P1x;
+    } else if (P2x >= P1x && P2x >= P3x) {
+      w_end = (int)P2x;
+    } else if (P3x >= P1x && P3x >= P2x) {
+      w_end = (int)P3x;
+    }
+    if (P1x <= P2x && P1x <= P3x) {
+      w_start = (int)P1x;
+    } else if (P2x <= P1x && P2x <= P3x) {
+      w_start = (int)P2x;
+    } else if (P3x <= P1x && P3x <= P2x) {
+      w_start = (int)P3x;
+    }
+    if (P1y >= P2y && P1y >= P3y) {
+      h_end = (int)P1y;
+    } else if (P2y >= P1y && P2y >= P3y) {
+      h_end = (int)P2y;
+    } else if (P3y >= P1y && P3y >= P2y) {
+      h_end = (int)P3y;
+    }
+    if (P1y <= P2y && P1y <= P3y) {
+      h_start = (int)P1y;
+    } else if (P2y <= P1y && P2y <= P3y) {
+      h_start = (int)P2y;
+    } else if (P3y <= P1y && P3y <= P2y) {
+      h_start = (int)P3y;
+    }
+    // Fill mat
+    Eigen::Matrix<double, 2, 2> A, A_1;
+    A << P2x - P1x, P3x - P1x,
+        P2y - P1y, P3y - P1y;
+    A_1 = A.inverse();
+
+    for (int h = h_start; h <= h_end; h++) {
+      for (int w = w_start; w <= w_end; w++) {
+        if (cam_set->mask.at<uchar>(h, w) != my::VERIFIED_TRUE)
+          continue;
+        Eigen::Matrix<double, 2, 1> B, C;
+        B << w - P1x, h - P1y;
+        C = A_1 * B;
+        double u = C(0, 0);
+        double v = C(1, 0);
+        if (u >= 0 && v >= 0 && u + v <= 1) {
+          cam_set->mesh_mat.at<ushort>(h, w) = (ushort)i_m;
+          cam_set->uv_weight(0, h * kCamWidth + w) = u;
+          cam_set->uv_weight(1, h * kCamWidth + w) = v;
+        }
+      }
+    }
+  }
+
+  return true;
 }
 
 bool NodeSet::IsNode(int x, int y) {
@@ -128,6 +225,7 @@ void NodeSet::GetTriVertexIdx(int x, int y, std::vector<int>* res) {
       res->push_back(vertex_set(0));
       res->push_back(vertex_set(1));
       res->push_back(vertex_set(2));
+      break;
     }
   }
   return;

@@ -26,6 +26,8 @@ const int kMaskMinAreaThred = 40;
 const double kDepthRad = 2;
 const int kNearestPoints = 8; // Used for neighbor interpolation
 const int kRegularNbr = 8;
+const double kStripDis = 12;
+const double kClassNum = 6;
 
 // For k_means
 const int kKMBlockHeightNum = 8;
@@ -66,6 +68,8 @@ struct CamMatSet {
   cv::Mat x_pro_range;
   ImgMatrix pointer;
   cv::Mat mask;
+  cv::Mat mesh_mat;
+  Eigen::Matrix<double, 2, Eigen::Dynamic> uv_weight;
 //  Eigen::Matrix<double, kIntensityClassNum, Eigen::Dynamic> km_center;
   Eigen::Matrix<double, 3, Eigen::Dynamic> norm_vec;
 };

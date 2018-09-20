@@ -22,9 +22,14 @@ public:
   Eigen::Matrix<int, Eigen::Dynamic, 2> pos_;
   Eigen::Matrix<uchar, Eigen::Dynamic, 1> valid_;
 
+  std::vector<cv::Point3i> mesh_;
+
   NodeSet();
   ~NodeSet();
   void Clear();
+  bool CreateMeshSet();
+  bool FillMatWithMeshIdx(CamMatSet* cam_set);
+
   bool IsNode(int x, int y);
   void GetNodeCoordByPos(int x, int y, int * h, int * w);
   void GetNodeCoordByIdx(int idx, int * h, int * w);
@@ -33,6 +38,7 @@ public:
   void GetNearestkNodesIdx(int x, int y, std::vector<int>* res);
   bool SetNodePos(int idx, int x, int y);
   Eigen::Matrix<double, Eigen::Dynamic, 2> FindkNearestNodes(int x, int y, int k);
+
   bool WriteToFile(std::string file_name);
 };
 
